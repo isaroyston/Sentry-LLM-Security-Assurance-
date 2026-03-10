@@ -162,6 +162,8 @@ python examples.py
 
 ```env
 OPENAI_API_KEY=your_api_key_here
+SENTINEL_API_KEY=your_sentinel_api_key_here
+SENTINEL_API_URL=https://sentinel.stg.aiguardian.gov.sg/api/v1/validate
 VECTOR_DB_PATH=./data/vector_db
 COLLECTION_NAME=chatbot_knowledge
 MODEL_NAME=gpt-3.5-turbo

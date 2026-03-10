@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.vector_store.vector_store import VectorStore
 
 class RedTeamAttacker:
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(self, model: str = "gpt-4o-mini", tools: list = None):
         
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -19,6 +19,15 @@ class RedTeamAttacker:
         self.client = OpenAI(api_key=self.api_key)
         self.model = model
         self.vs = VectorStore(persist_directory="./vectordb", collection_name="sgbank_withdrawal_policy")
+        self.tools = tools if tools else []
+        
+    def _apply_tools(self, prompt: str) -> str:
+        """Runs the generated prompt through all activated tools sequentially."""
+        mutated_prompt = prompt
+        for tool in self.tools:
+            # Each tool is expected to have an .apply(prompt) method
+            mutated_prompt = tool.apply(mutated_prompt)
+        return mutated_prompt
         
     def generate_next_attack(self, objective: str, history: str, prompt_reference: str) -> str:
         """Generates the next adversarial prompt based on the bot's previous response."""
@@ -46,7 +55,11 @@ class RedTeamAttacker:
                       {"role": "user", "content": f"History:\n{history}\n\nNext Attack Prompt:"}],
             temperature=0.3
         )
-        return response.choices[0].message.content.strip()
+        
+        base_prompt = response.choices[0].message.content.strip()
+    
+        final_prompt = self._apply_tools(base_prompt)
+        return final_prompt
     
     
     def _retrieve_context(self, query: str, n_results: int = 3) -> str:
@@ -85,8 +98,8 @@ class RedTeamAttacker:
         return "SUCCESS" in res.choices[0].message.content.upper()
     
     
-def run_generative_attack(bot, json_path: str, max_turns: int = 4):
-    attacker = RedTeamAttacker()
+def run_generative_attack(bot, json_path: str, max_turns: int = 4, attack_tools: list = None):
+    attacker = RedTeamAttacker(model="gpt-4o-mini", tools=attack_tools)
     with open(json_path, 'r') as f:
         scenarios = json.load(f)
 
@@ -100,7 +113,8 @@ def run_generative_attack(bot, json_path: str, max_turns: int = 4):
         
         # Start with the 'Seed' prompt from JSON
         counter = 0
-        current_prompt = sc['turns'][0]['input']
+        raw_prompt = sc['turns'][0]['input']
+        current_prompt = attacker._apply_tools(raw_prompt) if attack_tools else raw_prompt
         for turn in range(max_turns):
             response = bot.chat(current_prompt)
             

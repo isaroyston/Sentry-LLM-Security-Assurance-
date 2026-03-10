@@ -16,10 +16,11 @@ import sys
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vector_store.vector_store import VectorStore
+from .sentinel_guard import SentinelGuard
 
 OLD_SYS_PROMPT = """
     Old sys prompt.
@@ -93,6 +94,25 @@ DOC_FOCUS = {
     """.strip(),
 }
 
+POLICY_DOC_IDS = {
+    "emergency": "sgbank_emergency_withdrawal_policy",
+    "identity": "sgbank_identity_verification_and_authentication_policy",
+    "fraud": "sgbank_transaction_monitoring_and_fraud_detection_policy",
+    "withdrawal": "sgbank_withdrawal_policy_and_procedures",
+}
+
+
+def make_doc_system_prompt(doc_id: str) -> str:
+    rag_tool_name = f"rag_{doc_id}"
+    return (
+        BASE_SYS_PROMPT.format(rag_tool_name=rag_tool_name)
+        + "\n\n"
+        + "Approved document:\n"
+        + f"- {doc_id}\n\n"
+        + "Document-specific guidance:\n"
+        + DOC_FOCUS.get(doc_id, "")
+    ).strip()
+
 # -----------------------------
 # RAG tool factory (doc-scoped)
 # -----------------------------
@@ -134,17 +154,8 @@ def build_doc_agent(llm, vector_store, doc_id: str, k: int = 3):
     # if extra_tools:
     #     tools.extend(extra_tools)
 
-    agent = create_react_agent(llm, tools)
-
-    rag_tool_name = f"rag_{doc_id}"
-    system_prompt = (
-        BASE_SYS_PROMPT.format(rag_tool_name=rag_tool_name)
-        + "\n\n"
-        + "Approved document:\n"
-        + f"- {doc_id}\n\n"
-        + "Document-specific guidance:\n"
-        + DOC_FOCUS.get(doc_id, "")
-    ).strip()
+    agent = create_agent(llm, tools)
+    system_prompt = make_doc_system_prompt(doc_id)
 
     def run(user_message: str, history=None):
         history = history or []
@@ -159,34 +170,27 @@ def build_doc_agent(llm, vector_store, doc_id: str, k: int = 3):
 # Build all 4 agents for your ingested doc_id set
 # ----------------------------------------------------
 def build_all_policy_agents(llm, vector_store):
-    DOC_IDS = {
-        "emergency": "sgbank_emergency_withdrawal_policy",
-        "identity": "sgbank_identity_verification_and_authentication_policy",
-        "fraud": "sgbank_transaction_monitoring_and_fraud_detection_policy",
-        "withdrawal": "sgbank_withdrawal_policy_and_procedures",
-    }
-
     # Choose tools per agent.
     # Recommendation: do NOT give sensitive tools (account lookup, eligibility checker)
     # to docs that don't need them. Keep tool surface minimal.
     agents = {
         "withdrawal": build_doc_agent(
-            llm, vector_store, DOC_IDS["withdrawal"],
+            llm, vector_store, POLICY_DOC_IDS["withdrawal"],
             # extra_tools=[find_nearest_branch, create_support_ticket, search_policy_faq],
             k=3,
         ),
         "emergency": build_doc_agent(
-            llm, vector_store, DOC_IDS["emergency"],
+            llm, vector_store, POLICY_DOC_IDS["emergency"],
             # extra_tools=[find_nearest_branch, create_support_ticket, search_policy_faq],
             k=3,
         ),
         "identity": build_doc_agent(
-            llm, vector_store, DOC_IDS["identity"],
+            llm, vector_store, POLICY_DOC_IDS["identity"],
             # extra_tools=[create_support_ticket, search_policy_faq],
             k=3,
         ),
         "fraud": build_doc_agent(
-            llm, vector_store, DOC_IDS["fraud"],
+            llm, vector_store, POLICY_DOC_IDS["fraud"],
             # extra_tools=[create_support_ticket, search_policy_faq],
             k=3,
         ),
@@ -228,6 +232,8 @@ class WithdrawalChatbot:
         if not self.vector_store:
             raise ValueError("Vector store not provided. Pass vector_store=VectorStore(...).")
 
+        self.sentinel_guard = SentinelGuard()
+
         # Build doc-scoped policy agents (callables returned by build_doc_agent)
         self.policy_agents = build_all_policy_agents(self.llm, self.vector_store)
 
@@ -256,6 +262,47 @@ class WithdrawalChatbot:
         ]
         message_lower = user_message.lower()
         return any(keyword in message_lower for keyword in risky_keywords)
+    
+    # ---------------------------
+    # API-Based Guardrail Layer
+    # ---------------------------
+    def _build_sentinel_messages(self, agent_key: str, user_message: str) -> List[Dict[str, str]]:
+        doc_id = POLICY_DOC_IDS.get(agent_key)
+        if not doc_id:
+            return []
+        return [
+            {"role": "system", "content": make_doc_system_prompt(doc_id)},
+            {"role": "user", "content": user_message},
+        ]
+
+    def _check_sentinel_input(self, agent_key: str, user_message: str) -> bool:
+        if not self.sentinel_guard.enabled:
+            print("[Warning] SENTINEL_API_KEY missing. Skipping Sentinel input check.")
+            return False
+
+        result = self.sentinel_guard.validate(
+            text=user_message,
+            messages=self._build_sentinel_messages(agent_key, user_message),
+        )
+        if result.error:
+            print(f"[Sentinel Error] {result.error}")
+        if result.blocked:
+            print("[Sentinel Alert] Input blocked by guardrails.")
+        return result.blocked
+
+    def _check_sentinel_output(self, agent_key: str, user_message: str, answer: str) -> bool:
+        if not self.sentinel_guard.enabled:
+            return False
+
+        result = self.sentinel_guard.validate(
+            text=answer,
+            messages=self._build_sentinel_messages(agent_key, user_message),
+        )
+        if result.error:
+            print(f"[Sentinel Error] {result.error}")
+        if result.blocked:
+            print("[Sentinel Alert] Output blocked by guardrails.")
+        return result.blocked
 
     # ---------------------------
     # Deterministic Router
@@ -305,16 +352,22 @@ class WithdrawalChatbot:
     # Main Chat Method
     # ---------------------------
     def chat(self, user_message: str, debug: bool = False) -> str:
-        if self._should_reject(user_message):
-            return "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
+        #if self._should_reject(user_message):
+            #return "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
 
         agent_key = self._route(user_message)
+
+        if self._check_sentinel_input(agent_key, user_message):
+            return "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
+
         runner = self.policy_agents.get(agent_key)
         if not runner:
             return "System error: No agent available for this request."
-
         try:
             answer = runner(user_message, history=self.conversation_history[-5:])
+
+            if self._check_sentinel_output(agent_key, user_message, answer):
+                return "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
 
             # Update shared history
             self.conversation_history.append(HumanMessage(content=user_message))
