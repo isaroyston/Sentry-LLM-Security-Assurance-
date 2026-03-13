@@ -55,6 +55,7 @@ header p {
     max-width: 80%;
     line-height: 1.4;
     font-size: 0.95rem;
+    white-space: pre-wrap;
 }
 
 .assistant {
@@ -95,4 +96,57 @@ button {
 
 button:hover {
     background-color: #003366;
+}
+
+button:disabled,
+#user-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.loading-message {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 46px;
+}
+
+.loading-label {
+    color: #4b5563;
+}
+
+.loading-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #004a99;
+    animation: loading-bounce 1.2s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.loading-dot:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes loading-bounce {
+    0%,
+    80%,
+    100% {
+        opacity: 0.35;
+        transform: translateY(0) scale(0.9);
+    }
+
+    40% {
+        opacity: 1;
+        transform: translateY(-3px) scale(1);
+    }
 }
