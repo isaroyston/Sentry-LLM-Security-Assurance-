@@ -181,6 +181,8 @@ pytest tests/
 ```
 
 ## DAG Workflow
+
+```mermaid
 flowchart LR
   %% High-level orchestration
   subgraph AF[Airflow DAG: sgbank_red_teaming]
@@ -270,6 +272,8 @@ flowchart LR
   N1[(Env vars needed)] --- BOT
   N1 --- ATT
   N1[(OPENAI_API_KEY required\nSENTINEL_API_KEY optional\nCHAT_API_BASE_URL used by attacker for /search)]
+
+```
 
 ## License
 
