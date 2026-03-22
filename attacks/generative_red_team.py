@@ -7,7 +7,56 @@ from typing import List, Dict
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.vector_store.vector_store import VectorStore
+
+
+def _maybe_build_vector_store():
+    """Optionally build a VectorStore for context checks.
+
+    Disabled by default to keep this module lightweight in orchestrators (e.g., Airflow)
+    where importing sentence-transformers/torch/TF stacks inside forked processes can crash
+    on macOS. Enable by setting: ENABLE_ATTACKER_VECTORSTORE=1
+    """
+
+    flag = os.getenv("ENABLE_ATTACKER_VECTORSTORE", "0").strip().lower()
+    if flag not in {"1", "true", "yes", "y", "on"}:
+        return None
+
+    try:
+        from src.vector_store.vector_store import VectorStore
+
+        return VectorStore(persist_directory="./vectordb", collection_name="sgbank_withdrawal_policy")
+    except Exception:
+        return None
+
+
+def _retrieve_context_via_api(query: str, n_results: int = 3) -> str:
+    """Retrieve context from the FastAPI service if configured.
+
+    Uses CHAT_API_BASE_URL (preferred) or CONTEXT_API_BASE_URL.
+    This avoids importing sentence-transformers/torch/TF inside orchestrators.
+    """
+
+    base_url = (os.getenv("CHAT_API_BASE_URL") or os.getenv("CONTEXT_API_BASE_URL") or "").strip()
+    if not base_url:
+        return ""
+
+    try:
+        import requests
+
+        resp = requests.post(
+            base_url.rstrip("/") + "/search",
+            json={"query": query, "n_results": int(n_results)},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        docs = data.get("documents") if isinstance(data, dict) else None
+        if not isinstance(docs, list):
+            return ""
+        docs = [str(d) for d in docs if d is not None]
+        return "\n\n".join(docs)
+    except Exception:
+        return ""
 
 class RedTeamAttacker:
     def __init__(self, model: str = "gpt-4o-mini", tools: list = None):
@@ -18,7 +67,7 @@ class RedTeamAttacker:
         
         self.client = OpenAI(api_key=self.api_key)
         self.model = model
-        self.vs = VectorStore(persist_directory="./vectordb", collection_name="sgbank_withdrawal_policy")
+        self.vs = _maybe_build_vector_store()
         self.tools = tools if tools else []
         
     def _apply_tools(self, prompt: str) -> str:
@@ -63,6 +112,11 @@ class RedTeamAttacker:
     
     
     def _retrieve_context(self, query: str, n_results: int = 3) -> str:
+        # Prefer API-based retrieval when available (Airflow-safe).
+        api_ctx = _retrieve_context_via_api(query, n_results=n_results)
+        if api_ctx:
+            return api_ctx
+
         if not self.vs:
             return ""
         results = self.vs.search(query, n_results=n_results)

@@ -1,0 +1,12 @@
+# Airflow + red team pipeline extras
+# Install into your Airflow environment (not necessarily your base venv).
+
+apache-airflow>=2.8.0
+
+# Used by attacks/prompt_attacks.py
+tqdm>=4.66.0
+
+# Optional mutation tools dependencies (install if you enable those tools)
+# nltk>=3.8.1
+# homoglyphs>=2.0.4
+# textattack>=0.3.10

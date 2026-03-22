@@ -39,10 +39,39 @@ ENV/
 data/
 *.db
 *.sqlite
+vectordb/
 
 # Logs
 *.log
 
+# Reports / evaluation outputs
+reports/
+
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Airflow local runtime
+/airflow.cfg
+/airflow.db*
+/logs/
+
+# Local generated creds/secrets
+*.generated
+/simple_auth_manager_passwords*.json*
+
+# Root-level generated evaluation artifacts (don’t ignore datasets under src/)
+ /failed_cases.csv
+ /generative_attack_evaluation_results.json
+
+# Notebooks / Python tooling
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# SQLite3 variant
+*.sqlite3
