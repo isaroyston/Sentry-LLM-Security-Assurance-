@@ -194,33 +194,33 @@ flowchart LR
     D1[src/datasets/moonshot_jailbreak_prompts.csv]
     D2[src/datasets/Prompt Attacks Dataset - single turn.csv]
     D3[src/datasets/red_team_scenarios.json]
-    V1[Airflow Variables\nCHAT_API_BASE_URL\nMOONSHOT_DATASET_PATH\nPROMPT_ATTACKS_DATASET_PATH\nRED_TEAM_SCENARIOS_PATH\nPROMPT_MUTATION_TOOLS\nGENERATIVE_MAX_TURNS]
+    V1["Airflow Variables<br/>CHAT_API_BASE_URL<br/>MOONSHOT_DATASET_PATH<br/>PROMPT_ATTACKS_DATASET_PATH<br/>RED_TEAM_SCENARIOS_PATH<br/>PROMPT_MUTATION_TOOLS<br/>GENERATIVE_MAX_TURNS"]
   end
 
   %% API service
   subgraph API[Chatbot API Service (FastAPI)]
-    A0[api.py]\n/startup --> VS[VectorStore (ChromaDB)]
+    A0["api.py<br/>startup"] --> VS["VectorStore (ChromaDB)"]
     A0 --> BOT[WithdrawalChatbot]
-    A0 --> EP1[/chat]
-    A0 --> EP2[/reset]
-    A0 --> EP3[/search]
+    A0 --> EP1["/chat"]
+    A0 --> EP2["/reset"]
+    A0 --> EP3["/search"]
   end
 
   %% Red-team components
   subgraph RT[Red Team Functions / Modules]
-    AD[ApiChatbot adapter\n(dags/red_team_attacks_dag.py)]
+    AD["ApiChatbot adapter<br/>(dags/red_team_attacks_dag.py)"]
 
-    ST[Single-turn runner\n(iterate prompts + tool mutations)]
-    GT[Multi-turn runner\nattacks/generative_red_team.py: run_generative_attack]
+    ST["Single-turn runner<br/>(iterate prompts + tool mutations)"]
+    GT["Multi-turn runner<br/>attacks/generative_red_team.py: run_generative_attack"]
 
-    ATT[RedTeamAttacker\n(attacks/generative_red_team.py)]
-    TOOLS[Mutation tools\n(attacks/*: char_swap, homoglyph,\ninsert_punctuation, payload_mask,\ntext_bugger, text_fooler)]
+    ATT["RedTeamAttacker<br/>(attacks/generative_red_team.py)"]
+    TOOLS["Mutation tools<br/>(attacks/*): char_swap, homoglyph,<br/>insert_punctuation, payload_mask,<br/>text_bugger, text_fooler"]
   end
 
   %% External LLM
   subgraph LLM[OpenAI API]
-    O1[Chat completions\n(used by WithdrawalChatbot)]
-    O2[Chat completions\n(used by RedTeamAttacker\nfor next-attack + success-check)]
+    O1["Chat completions<br/>(used by WithdrawalChatbot)"]
+    O2["Chat completions<br/>(used by RedTeamAttacker<br/>for next-attack + success-check)"]
   end
 
   %% Outputs
@@ -228,8 +228,8 @@ flowchart LR
     R1[reports/<run_id>/single_prompt_results.csv]
     R2[reports/<run_id>/single_prompt_flagged.csv]
     R3[reports/<run_id>/single_prompt_summary.json]
-    R4[reports/<run_id>/generative_results.json\n(copied from repo-root generative_attack_evaluation_results.json)]
-    R5[reports/<run_id>/summary.json]\n(combined)
+    R4["reports/<run_id>/generative_results.json<br/>(copied from repo-root generative_attack_evaluation_results.json)"]
+    R5["reports/<run_id>/summary.json<br/>(combined)"]
   end
 
   %% Wiring: task 1
@@ -271,7 +271,7 @@ flowchart LR
   %% Notes about configuration
   N1[(Env vars needed)] --- BOT
   N1 --- ATT
-  N1[(OPENAI_API_KEY required\nSENTINEL_API_KEY optional\nCHAT_API_BASE_URL used by attacker for /search)]
+  N1[(OPENAI_API_KEY required<br/>SENTINEL_API_KEY optional<br/>CHAT_API_BASE_URL used by attacker for /search)]
 
 ```
 
