@@ -1,90 +1,123 @@
-const chatForm = document.getElementById('chat-form');
-const chatMessages = document.getElementById('chat-messages');
-const userInput = document.getElementById('user-input');
-const submitButton = chatForm.querySelector('button');
+// Chat functionality
+const messagesContainer = document.getElementById('messagesContainer');
+const userInput = document.getElementById('userInput');
+const sendBtn = document.getElementById('sendBtn');
 
-chatForm.addEventListener('submit', async function (e) {
-    e.preventDefault();
+// Send message on button click
+sendBtn.addEventListener('click', sendMessage);
 
-    const userMessageText = userInput.value.trim();
+// Send message on Enter key
+userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
 
-    if (userMessageText === '') return;
-
-    appendMessage('user', userMessageText);
+async function sendMessage() {
+    const message = userInput.value.trim();
+    
+    if (!message) return;
+    
+    // Clear input
     userInput.value = '';
-
-    setPendingState(true);
-    const loadingMessage = appendLoadingMessage();
-
+    userInput.focus();
+    
+    // Disable send button
+    sendBtn.disabled = true;
+    
+    // Add user message to DOM
+    addMessage(message, 'user');
+    
+    // Scroll to bottom
+    scrollToBottom();
+    
     try {
+        // Remove welcome message if it exists
+        const welcomeMsg = messagesContainer.querySelector('.welcome-message');
+        if (welcomeMsg) {
+            welcomeMsg.remove();
+        }
+        
+        // Show loading indicator
+        const loadingId = showLoading();
+        
+        // Send to backend
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ message: userMessageText })
+            body: JSON.stringify({ message: message })
         });
-
-        const data = await response.json();
-        loadingMessage.remove();
-
+        
+        // Remove loading indicator
+        removeLoading(loadingId);
+        
         if (!response.ok) {
-            appendMessage('assistant', data.error || 'Something went wrong while contacting the chatbot.');
-            return;
+            if (response.status === 401) {
+                addMessage('Session expired. Please log in again.', 'error');
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-
-        appendMessage('assistant', data.response);
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            addMessage(data.error, 'error');
+        } else {
+            addMessage(data.response, 'assistant');
+        }
+        
     } catch (error) {
         console.error('Error:', error);
-        loadingMessage.remove();
-        appendMessage('assistant', 'Something went wrong. Ensure the Flask app is running in the frontend folder.');
+        addMessage('Sorry, an error occurred. Please try again.', 'error');
     } finally {
-        setPendingState(false);
-        userInput.focus();
+        // Re-enable send button
+        sendBtn.disabled = false;
+        scrollToBottom();
     }
-});
+}
 
-function appendMessage(sender, text) {
+function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
-    messageDiv.classList.add('message', sender);
-    messageDiv.innerText = text;
-
-    chatMessages.appendChild(messageDiv);
+    messageDiv.className = `message ${sender}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = text;
+    
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    
     scrollToBottom();
-    return messageDiv;
 }
 
-function appendLoadingMessage() {
+function showLoading() {
     const loadingDiv = document.createElement('div');
-    loadingDiv.classList.add('message', 'assistant', 'loading-message');
-    loadingDiv.setAttribute('aria-label', 'Assistant is generating a response');
-
-    const label = document.createElement('span');
-    label.classList.add('loading-label');
-    label.innerText = 'Generating answer';
-
-    const dots = document.createElement('span');
-    dots.classList.add('loading-dots');
-    dots.setAttribute('aria-hidden', 'true');
-
-    for (let index = 0; index < 3; index += 1) {
-        const dot = document.createElement('span');
-        dot.classList.add('loading-dot');
-        dots.appendChild(dot);
-    }
-
-    loadingDiv.append(label, dots);
-    chatMessages.appendChild(loadingDiv);
+    loadingDiv.className = 'message assistant';
+    loadingDiv.innerHTML = `
+        <div class="loading">
+            <span></span><span></span><span></span>
+            <span>Assistant is thinking...</span>
+        </div>
+    `;
+    const loadingId = 'loading-' + Date.now();
+    loadingDiv.id = loadingId;
+    messagesContainer.appendChild(loadingDiv);
     scrollToBottom();
-    return loadingDiv;
+    return loadingId;
 }
 
-function setPendingState(isPending) {
-    userInput.disabled = isPending;
-    submitButton.disabled = isPending;
-    submitButton.innerText = isPending ? 'Waiting...' : 'Send';
+function removeLoading(loadingId) {
+    const loadingElement = document.getElementById(loadingId);
+    if (loadingElement) {
+        loadingElement.remove();
+    }
 }
 
 function scrollToBottom() {
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
