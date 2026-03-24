@@ -4,7 +4,10 @@ import sys
 from functools import wraps
 from uuid import uuid4
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+# Ensure repo root is on sys.path (important for WSGI deployments where CWD may differ)
+project_root = BASE_DIR
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -16,7 +19,16 @@ load_dotenv()
 dotenv_path = find_dotenv(".env", usecwd=True)
 load_dotenv(dotenv_path, override=True)
 
-app = Flask(__name__)
+templates_dir = os.path.join(BASE_DIR, "frontend", "templates")
+static_dir = os.path.join(BASE_DIR, "frontend", "static")
+
+# Keep URL paths stable (/static/...) while hosting files in frontend/static
+app = Flask(
+    __name__,
+    template_folder=templates_dir,
+    static_folder=static_dir,
+    static_url_path="/static",
+)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-in-production")
 
 # Initialize Supabase database connection

@@ -1,0 +1,53 @@
+# Ignore local environment & secrets
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Jupyter / experiments
+*.ipynb
+
+# Airflow + orchestration (not needed for deploying the Flask web app)
+airflow.cfg
+airflow.db
+dags/
+logs/
+
+# Red-teaming modules (not needed for deploying the Flask web app)
+attacks/
+
+# Local data, reports, and generated artifacts
+reports/
+summaries/
+vectordb/
+*.sqlite3
+*.json
+
+# Large datasets (keep only if your web app truly needs them at runtime)
+src/datasets/
+src/documents
+
+# Frontend dev-only folder (template already loads from frontend/static)
+frontend/public/
+frontend/venv
+
+# Generated credentials/artifacts
+simple_auth_manager_passwords.json.generated
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
