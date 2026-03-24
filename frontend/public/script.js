@@ -1,43 +1,127 @@
-document.getElementById('chat-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
+// 
+// OUTDATED - This file is no longer used. Please refer to frontend/static/script.js for the latest code.
+// 
+// 
+// Chat functionality
+const messagesContainer = document.getElementById('messagesContainer');
+const userInput = document.getElementById('userInput');
+const sendBtn = document.getElementById('sendBtn');
 
-    const userInput = document.getElementById('user-input');
-    const userMessageText = userInput.value.trim();
+// Send message on button click
+sendBtn.addEventListener('click', sendMessage);
 
-    if (userMessageText === '') return;
+// Send message on Enter key
+userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
 
-    // Display user's message
-    appendMessage('user', userMessageText);
-
+async function sendMessage() {
+    const message = userInput.value.trim();
+    
+    if (!message) return;
+    
     // Clear input
     userInput.value = '';
-
-    // Node.js Backend Call (Placeholder)
+    userInput.focus();
+    
+    // Disable send button
+    sendBtn.disabled = true;
+    
+    // Add user message to DOM
+    addMessage(message, 'user');
+    
+    // Scroll to bottom
+    scrollToBottom();
+    
     try {
+        // Remove welcome message if it exists
+        const welcomeMsg = messagesContainer.querySelector('.welcome-message');
+        if (welcomeMsg) {
+            welcomeMsg.remove();
+        }
+        
+        // Show loading indicator
+        const loadingId = showLoading();
+        
+        // Send to backend
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ message: userMessageText })
+            body: JSON.stringify({ message: message })
         });
-
+        
+        // Remove loading indicator
+        removeLoading(loadingId);
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                addMessage('Session expired. Please log in again.', 'error');
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
-        appendMessage('assistant', data.response);
+        
+        if (data.error) {
+            addMessage(data.error, 'error');
+        } else {
+            addMessage(data.response, 'assistant');
+        }
+        
     } catch (error) {
         console.error('Error:', error);
-        appendMessage('assistant', "Something went wrong. Ensure you've run 'npm start' in the frontend folder.");
+        addMessage('Sorry, an error occurred. Please try again.', 'error');
+    } finally {
+        // Re-enable send button
+        sendBtn.disabled = false;
+        scrollToBottom();
     }
-});
+}
 
-function appendMessage(sender, text) {
-    const chatMessages = document.getElementById('chat-messages');
+function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
-    messageDiv.classList.add('message', sender);
-    messageDiv.innerText = text;
+    messageDiv.className = `message ${sender}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = text;
+    
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    
+    scrollToBottom();
+}
 
-    chatMessages.appendChild(messageDiv);
+function showLoading() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'message assistant';
+    loadingDiv.innerHTML = `
+        <div class="loading">
+            <span></span><span></span><span></span>
+            <span>Assistant is thinking...</span>
+        </div>
+    `;
+    const loadingId = 'loading-' + Date.now();
+    loadingDiv.id = loadingId;
+    messagesContainer.appendChild(loadingDiv);
+    scrollToBottom();
+    return loadingId;
+}
 
-    // Scroll to bottom
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+function removeLoading(loadingId) {
+    const loadingElement = document.getElementById(loadingId);
+    if (loadingElement) {
+        loadingElement.remove();
+    }
+}
+
+function scrollToBottom() {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }

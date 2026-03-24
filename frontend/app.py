@@ -1,7 +1,8 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import os
 import sys
-import time
+from functools import wraps
+from uuid import uuid4
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -16,6 +17,7 @@ dotenv_path = find_dotenv(".env", usecwd=True)
 load_dotenv(dotenv_path, override=True)
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-in-production")
 
 # Initialize Supabase database connection
 try:
@@ -28,30 +30,159 @@ except Exception as e:
     print(f"ERROR initializing database: {e}")
     raise
 
-# Initialize chatbot with Supabase backend
-bot = WithdrawalChatbot(db=db)
 print("✓ Withdrawal Chatbot initialized with Supabase backend")
+
+# ===================================
+# Authentication Decorator
+# ===================================
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ===================================
+# Auth Routes
+# ===================================
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        if not email or not password:
+            return render_template('register.html', error='Email and password required')
+         
+        if password != confirm_password:
+            return render_template('register.html', error='Passwords do not match')
+        
+        if len(password) < 6:
+            return render_template('register.html', error='Password must be at least 6 characters')
+        
+        try:
+            # Sign up with Supabase Auth
+            response = db.client.auth.sign_up({
+                "email": email,
+                "password": password
+            })
+            
+            user_id = response.user.id
+            
+            # Create user in our users table
+            db.create_user(
+                user_id=user_id,
+                email=email,
+                metadata={"signup_method": "email", "created_at": str(uuid4())}
+            )
+            
+            # Auto-login after signup
+            session['user_id'] = user_id
+            session['email'] = email
+            session.permanent = True
+            
+            return redirect(url_for('chat'))
+        
+        except Exception as e:
+            error_msg = str(e)
+            if 'already registered' in error_msg.lower():
+                error_msg = 'Email already registered. Please login instead.'
+            return render_template('register.html', error=error_msg)
+    
+    return render_template('register.html')
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '').strip()
+        
+        if not email or not password:
+            return render_template('login.html', error='Email and password required')
+        
+        try:
+            # Sign in with Supabase Auth
+            response = db.client.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+            
+            user_id = response.user.id
+            
+            # Store in session
+            session['user_id'] = user_id
+            session['email'] = email
+            session.permanent = True
+            
+            return redirect(url_for('chat'))
+        
+        except Exception as e:
+            return render_template('login.html', error='Invalid email or password')
+    
+    return render_template('login.html')
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+
+# ===================================
+# Chat Routes (Protected)
+# ===================================
 
 @app.route('/')
 def index():
-    # Renders the HTML template
-    return render_template('index.html')
+    # Redirect to login if not authenticated
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    return redirect(url_for('chat'))
+
+
+@app.route('/chat')
+@login_required
+def chat():
+    # Renders the chatbot page
+    return render_template('index.html', email=session.get('email'))
+
 
 @app.route('/api/chat', methods=['POST'])
-def chat():
+@login_required
+def send_chat():
     data = request.json
     user_message = data.get('message', '')
+    user_id = session.get('user_id')
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
-    # Call the actual chatbot logic
     try:
+        # Initialize chatbot with authenticated user
+        bot = WithdrawalChatbot(db=db, user_id=user_id)
         response = bot.chat(user_message)
-    except Exception as e:
-        response = f"Error: {str(e)}"
+        return jsonify({"response": response})
     
-    return jsonify({"response": response})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/conversation-history', methods=['GET'])
+@login_required
+def get_history():
+    """Get conversation history for logged-in user"""
+    user_id = session.get('user_id')
+    
+    try:
+        history = db.get_user_conversations(user_id)
+        return jsonify({"conversations": history})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     # Running Flask in debug mode for development

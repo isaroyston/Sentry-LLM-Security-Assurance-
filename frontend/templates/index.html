@@ -3,25 +3,311 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SGBank Withdrawal Assistant</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>SGBank - Chat Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100vh;
+            background: white;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 25px;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+        
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .logout-form {
+            display: inline;
+        }
+        
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .message {
+            display: flex;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .message.user {
+            justify-content: flex-end;
+        }
+        
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+            line-height: 1.4;
+            font-size: 14px;
+        }
+        
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .message.assistant .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .message.error .message-content {
+            background: #ffebee;
+            color: #d32f2f;
+            border: 1px solid #ef5350;
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #999;
+            font-style: italic;
+        }
+        
+        .loading span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite;
+        }
+        
+        .loading span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .loading span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes bounce {
+            0%, 80%, 100% {
+                opacity: 0.3;
+                transform: translateY(0);
+            }
+            40% {
+                opacity: 1;
+                transform: translateY(-10px);
+            }
+        }
+        
+        .input-container {
+            padding: 20px 30px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+        }
+        
+        .input-wrapper {
+            flex: 1;
+            display: flex;
+            gap: 8px;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 24px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        input[type="text"]::placeholder {
+            color: #bbb;
+        }
+        
+        .send-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 24px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+        }
+        
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .welcome-message {
+            text-align: center;
+            color: #999;
+            padding: 40px 20px;
+        }
+        
+        .welcome-message h2 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .welcome-message p {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .scrollbar::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+        
+        .scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+    </style>
 </head>
 <body>
     <div class="chat-container">
-        <header>
+        <div class="header">
             <h1>SGBank Withdrawal Assistant</h1>
-            <p>Live Chatbot Connection</p>
-        </header>
-        
-        <div id="chat-messages" class="chat-messages">
-            <div class="message assistant">Hello! I am your SGBank Assistant. How help you today?</div>
+            <div class="header-right">
+                <div class="user-info">
+                    <div class="user-avatar">{{ email[0].upper() }}</div>
+                    <span>{{ email }}</span>
+                </div>
+                <form class="logout-form" action="{{ url_for('logout') }}" method="POST">
+                    <button class="logout-btn" type="submit">Logout</button>
+                </form>
+            </div>
         </div>
-
-        <form id="chat-form" class="chat-input-area">
-            <input type="text" id="user-input" placeholder="Type your message here..." autocomplete="off" required>
-            <button type="submit">Send</button>
-        </form>
+        
+        <div class="messages-container scrollbar" id="messagesContainer">
+            <div class="welcome-message">
+                <h2>Welcome to SGBank Chatbot</h2>
+                <p>Ask me anything about withdrawals, emergency procedures, identity verification, or fraud prevention.</p>
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <div class="input-wrapper">
+                <input 
+                    type="text" 
+                    id="userInput" 
+                    placeholder="Type your message here..." 
+                    autocomplete="off"
+                >
+                <button class="send-btn" id="sendBtn" type="button">Send</button>
+            </div>
+        </div>
     </div>
+    
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

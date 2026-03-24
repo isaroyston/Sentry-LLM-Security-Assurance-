@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGBank - Sign Up</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .auth-container {
+            background: white;
+            padding: 50px 40px;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 420px;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo h1 {
+            color: #667eea;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        .logo p {
+            color: #999;
+            font-size: 13px;
+            margin-top: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        h2 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 24px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #ffebee;
+            color: #d32f2f;
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #d32f2f;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .error.show {
+            display: block;
+            animation: shake 0.3s ease-in-out;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        input::placeholder {
+            color: #bbb;
+        }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .login-link {
+            text-align: center;
+            margin-top: 25px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .login-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+        
+        .login-link a:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+        
+        .requirements {
+            background: #e8f5e9;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #2e7d32;
+            line-height: 1.6;
+        }
+        
+        .requirements ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+        
+        .requirements li::before {
+            content: "✓ ";
+            color: #4caf50;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        
+        .password-strength {
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .strength-weak {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .strength-medium {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .strength-strong {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 25px 0;
+            color: #ccc;
+            font-size: 13px;
+        }
+        
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #e0e0e0;
+        }
+        
+        .divider span {
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="logo">
+            <h1>SGBank</h1>
+            <p>Withdrawal Assistant</p>
+        </div>
+        
+        <h2>Create Account</h2>
+        
+        {% if error %}
+        <div class="error show">{{ error }}</div>
+        {% else %}
+        <div class="error" id="error-message"></div>
+        {% endif %}
+        
+        <form method="POST">
+            <div class="requirements">
+                <strong>Password Requirements:</strong>
+                <ul>
+                    <li>At least 6 characters</li>
+                    <li>Mix of letters and numbers</li>
+                    <li>Secure your account</li>
+                </ul>
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="you@example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="Create a strong password" required minlength="6" onkeyup="checkPasswordStrength()">
+                <div id="password-strength" class="password-strength" style="display: none;"></div>
+            </div>
+            
+            <div class="form-group">
+                <label for="confirm_password">Confirm Password</label>
+                <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirm your password" required minlength="6">
+            </div>
+            
+            <button type="submit">Create Account</button>
+        </form>
+        
+        <div class="divider">
+            <span>Already have an account?</span>
+        </div>
+        
+        <div class="login-link">
+            <a href="{{ url_for('login') }}">Sign In Here</a>
+        </div>
+    </div>
+    
+    <script>
+        function checkPasswordStrength() {
+            const password = document.getElementById('password').value;
+            const strengthDiv = document.getElementById('password-strength');
+            
+            if(!password) {
+                strengthDiv.style.display = 'none';
+                return;
+            }
+            
+            strengthDiv.style.display = 'block';
+            
+            let strength = 0;
+            
+            if(password.length >= 6) strength++;
+            if(password.length >= 10) strength++;
+            if(/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+            if(/[0-9]/.test(password)) strength++;
+            if(/[^a-zA-Z0-9]/.test(password)) strength++;
+            
+            if(strength < 2) {
+                strengthDiv.className = 'password-strength strength-weak';
+                strengthDiv.textContent = '❌ Weak password';
+            } else if(strength < 4) {
+                strengthDiv.className = 'password-strength strength-medium';
+                strengthDiv.textContent = '⚠ Medium strength';
+            } else {
+                strengthDiv.className = 'password-strength strength-strong';
+                strengthDiv.textContent = '✓ Strong password';
+            }
+        }
+        
+        document.querySelector('form').addEventListener('submit', function(e) {
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirm_password').value;
+            
+            if(password !== confirmPassword) {
+                e.preventDefault();
+                const errorDiv = document.getElementById('error-message');
+                errorDiv.textContent = 'Passwords do not match';
+                errorDiv.classList.add('show');
+            }
+        });
+    </script>
+</body>
+</html>
