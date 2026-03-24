@@ -1,15 +1,19 @@
 # Core dependencies
-openai>=1.0.0
-langchain>=0.1.0
-langchain-community>=0.0.1
-chromadb>=0.4.0
-sentence-transformers>=2.2.0
-numpy>=1.24.0
-pandas>=2.0.0
-requests>=2.31.0
+openai>=1.0,<2.0
+langchain>=1.2,<2.0
+langchain-core>=1.2,<2.0
+langchain-openai>=1.1,<2.0
+langchain-community>=0.4,<0.5
+chromadb>=1.5,<2.0
+sentence-transformers>=5.0,<6.0
+numpy>=1.24,<3.0
+pandas>=2.0,<3.0
+requests>=2.31,<3.0
 
-# Optional dependencies
-python-dotenv>=1.0.0
-fastapi>=0.100.0
-uvicorn>=0.23.0
-pydantic>=2.0.0
+# App/runtime dependencies
+python-dotenv>=1.0,<2.0
+fastapi>=0.117,<1.0
+uvicorn>=0.42,<1.0
+pydantic>=2.0,<3.0
+flask>=3.0,<4.0
+pypdf>=6.0,<7.0
