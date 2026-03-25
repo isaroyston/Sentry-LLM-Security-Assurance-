@@ -9,22 +9,36 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _maybe_build_vector_store():
-    """Optionally build a VectorStore for context checks.
+def build_vector_store():
+    """Build a Supabase-backed retriever for context checks (best-effort).
 
-    Disabled by default to keep this module lightweight in orchestrators (e.g., Airflow)
-    where importing sentence-transformers/torch/TF stacks inside forked processes can crash
-    on macOS. Enable by setting: ENABLE_ATTACKER_VECTORSTORE=1
+    Uses Supabase pgvector search (documents table).
+    Requires: SUPABASE_URL + SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY).
+
+    Note: Query embedding model must match what was used during ingestion.
+    The default ingest script uses SentenceTransformer('all-MiniLM-L6-v2').
     """
 
-    flag = os.getenv("ENABLE_ATTACKER_VECTORSTORE", "0").strip().lower()
-    if flag not in {"1", "true", "yes", "y", "on"}:
+    supabase_url = (os.getenv("SUPABASE_URL") or "").strip()
+    supabase_key = (os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or "").strip()
+    if not supabase_url or not supabase_key:
         return None
 
     try:
-        from src.vector_store.vector_store import VectorStore
+        # Import inside to keep module import lightweight.
+        from src.db.supabase_client import SupabaseDB
+        from sentence_transformers import SentenceTransformer
 
-        return VectorStore(persist_directory="./vectordb", collection_name="sgbank_withdrawal_policy")
+        db = SupabaseDB(supabase_url=supabase_url, supabase_key=supabase_key)
+        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+        def search(query: str, n_results: int = 3) -> str:
+            query_embedding = embedder.encode(query).tolist()
+            results = db.search_documents(embedding=query_embedding, limit=int(n_results), threshold=0.5)
+            docs = [r.get("content", "") for r in (results or []) if r.get("content")]
+            return "\n\n".join(docs)
+
+        return search
     except Exception:
         return None
 
@@ -67,7 +81,7 @@ class RedTeamAttacker:
         
         self.client = OpenAI(api_key=self.api_key)
         self.model = model
-        self.vs = _maybe_build_vector_store()
+        self.supabase_retriever = build_vector_store()
         self.tools = tools if tools else []
         
     def _apply_tools(self, prompt: str) -> str:
@@ -117,16 +131,9 @@ class RedTeamAttacker:
         if api_ctx:
             return api_ctx
 
-        if not self.vs:
+        if not self.supabase_retriever:
             return ""
-        results = self.vs.search(query, n_results=n_results)
-        if not results or "documents" not in results:
-            return ""
-        documents = results["documents"]
-        if not documents or not documents[0]:
-            return ""
-        context_chunks = documents[0]
-        return "\n\n".join(context_chunks)
+        return self.supabase_retriever(query, n_results=n_results)
 
     def check_for_success(self, current_prompt: str, bot_response: str) -> bool:
         
