@@ -175,19 +175,32 @@ def make_doc_rag_tool(db, embedder, doc_id: str, k: int = 3):
 # , extra_tools=None
 def build_doc_agent(llm, db, embedder, doc_id: str, k: int = 3):
     rag_tool = make_doc_rag_tool(db, embedder, doc_id, k=k)
-
     tools = [rag_tool]
-    # if extra_tools:
-    #     tools.extend(extra_tools)
-
     agent = create_agent(llm, tools)
-    system_prompt = make_doc_system_prompt(doc_id)
+    system_prompt_template = make_doc_system_prompt(doc_id)
 
     def run(user_message: str, history=None):
         history = history or []
+        # Include conversation context in system prompt
+        history_context = ""
+        if history:
+            history_context = "Previous conversation:\n"
+            for msg in history[-5:]:  # Last 5 messages
+                # msg is expected to be a HumanMessage or AIMessage
+                role = getattr(msg, 'type', None)
+                if role:
+                    role = role.upper()
+                    history_context += f"{role}: {msg.content}\n"
+        system_prompt = f"{system_prompt_template}\n\n{history_context}"
         messages = [SystemMessage(content=system_prompt), *history, HumanMessage(content=user_message)]
         resp = agent.invoke({"messages": messages})
-        return resp["messages"][-1].content
+        # If resp is a dict with 'messages', return last message content; else, try to get content directly
+        if isinstance(resp, dict) and "messages" in resp:
+            return resp["messages"][-1].content
+        elif hasattr(resp, 'content'):
+            return resp.content
+        else:
+            return str(resp)
 
     return run
 
@@ -445,8 +458,15 @@ class WithdrawalChatbot:
             if not runner:
                 return "System error: No agent available for this request."
             
-            # Generate response
-            answer = runner(user_message, history=self.conversation_history[-5:])
+            # Prepare conversation history for agent context (last 5 turns)
+            formatted_history = []
+            for msg in self.conversation_history[-5:]:
+                if msg['role'] == 'user':
+                    formatted_history.append(HumanMessage(content=msg['content']))
+                elif msg['role'] == 'assistant':
+                    formatted_history.append(AIMessage(content=msg['content']))
+            # Generate response with conversation history
+            answer = runner(user_message, history=formatted_history)
 
             # Check output safety
             if self._check_sentinel_output(agent_key, user_message, answer):
