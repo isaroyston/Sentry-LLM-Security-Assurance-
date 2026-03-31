@@ -47,6 +47,8 @@ vectordb/
 # Reports / evaluation outputs
 reports/
 
+#builds
+Dockerfile
 
 # OS
 .DS_Store

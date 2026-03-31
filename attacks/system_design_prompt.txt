@@ -1,0 +1,20 @@
+# Backend 
+
+prompt_attacks.py
+
+
+# App 
+
+## Fucntionalities
+- Connect Chatbot API 
+User can select prompt attack methods 
+- General (All generic prompt attacks) ; static datasets
+- Custom Prompts Dataset - can edit tabular data and 
+- Red Team LLM w/ Scenarios (can edit objective and suggested prompt reference)
+
+## Report 
+
+- Show Attack Success Rate Overall
+- Show Attack Success Count and Rate, Segment by Prompt Categories
+- Show Vulnerabilities Defended against
+- Drop down to show specific leakage categories
