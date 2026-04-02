@@ -1,0 +1,58 @@
+name: Deploy to Azure Web App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Store these as GitHub Repository Variables (Settings → Secrets and variables → Actions → Variables)
+  AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create minimal deploy package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf deploy app.zip
+          mkdir -p deploy/src
+
+          # Minimal runtime files
+          cp -v requirements.txt deploy/
+          cp -v app.py deploy/
+
+          # Only ship needed source packages
+          rsync -av --delete --exclude '__pycache__' src/chatbot/ deploy/src/chatbot/
+          rsync -av --delete --exclude '__pycache__' src/db/ deploy/src/db/
+
+          # Frontend assets (templates/static)
+          rsync -av --delete --exclude '__pycache__' frontend/ deploy/frontend/
+
+          # Create zip for Zip Deploy
+          (cd deploy && zip -r ../app.zip .)
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: app.zip
