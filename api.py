@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from src.vector_store.vector_store import VectorStore
+from src.db.supabase_client import SupabaseDB
 from src.chatbot.withdrawal_chatbot import WithdrawalChatbot
 
 load_dotenv()
@@ -31,13 +31,9 @@ class SearchResponse(BaseModel):
 
 @app.on_event("startup")
 def startup() -> None:
-    # Persist dir assumes you run uvicorn from repo root (same as main.py)
-    vs = VectorStore(
-        persist_directory="./vectordb",
-        collection_name="sgbank_withdrawal_policy",
-    )
-    app.state.bot = WithdrawalChatbot(vector_store=vs)
-    app.state.vector_store = vs
+    db = SupabaseDB()
+    app.state.bot = WithdrawalChatbot(db=db)
+    app.state.db = db
 
 @app.get("/health")
 def health():
@@ -83,17 +79,15 @@ def search(req: SearchRequest):
     if req.n_results < 1 or req.n_results > 20:
         raise HTTPException(status_code=400, detail="n_results must be between 1 and 20")
 
-    vs = getattr(app.state, "vector_store", None)
-    if vs is None:
-        raise HTTPException(status_code=503, detail="Vector store not initialized")
-
     try:
-        results = vs.search(req.query, n_results=req.n_results)
-        documents = []
-        if isinstance(results, dict):
-            docs = results.get("documents")
-            if isinstance(docs, list) and docs and isinstance(docs[0], list):
-                documents = [str(d) for d in docs[0] if d is not None]
+        bot = getattr(app.state, "bot", None)
+        db = getattr(app.state, "db", None)
+        if bot is None or db is None:
+            raise HTTPException(status_code=503, detail="Bot/DB not initialized")
+
+        query_embedding = bot.embedder.encode(req.query).tolist()
+        results = db.search_documents(embedding=query_embedding, limit=req.n_results, threshold=0.5)
+        documents = [str(r.get("content")) for r in (results or []) if r.get("content")]
         return SearchResponse(documents=documents)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

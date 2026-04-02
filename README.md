@@ -180,6 +180,20 @@ MAX_TOKENS=500
 pytest tests/
 ```
 
+## Red Team Dashboard (Streamlit)
+
+Run the local dashboard:
+
+```bash
+pip install -r requirements.txt
+streamlit run attacks/streamlit_app.py
+```
+
+Environment variables:
+
+- The app will load `attacks/.env` if present, otherwise it will fall back to the repo-root `.env`.
+- Use `attacks/.env.example` as a template.
+
 ## License
 
 MIT License

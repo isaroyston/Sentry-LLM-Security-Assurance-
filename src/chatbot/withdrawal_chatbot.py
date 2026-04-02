@@ -203,7 +203,17 @@ class WithdrawalChatbot:
         self._graph = self._build_graph()
 
     def clear_history(self):
-        """Backwards-compatible no-op: history is stored in Supabase per conversation."""
+        """Start a fresh Supabase conversation.
+
+        Airflow/red-teaming orchestrators expect `/reset` to isolate scenarios.
+        With Supabase-backed persistence, the simplest isolation is a new conversation.
+        """
+
+        conv = self.db.create_conversation(
+            user_id=self.user_id,
+            title="Withdrawal Bot Session",
+        )
+        self.conversation_id = conv["id"]
         return
 
     # ---------------------------
@@ -517,11 +527,9 @@ class WithdrawalChatbot:
     # ---------------------------
     def chat(self, user_message: str, debug: bool = False) -> str:
         """Chat with the withdrawal assistant and store in Supabase."""
-
         try:
             # Expose debug flag to LangGraph nodes for logging
             self._debug = bool(debug)
-
             result = self._graph.invoke({"user_message": user_message})
             answer = (result or {}).get("answer") or "System error: No answer generated."
 

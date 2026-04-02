@@ -1,7 +1,12 @@
 # Backend 
-
-prompt_attacks.py
-
+- prompt_attacks.py -single line prompt attacks from csv files 
+- modules folder contain the type of prompt attack modules to edit prompts e.g ( homoglyph.py and payload_mask.py)
+- generative_red_team.py reads from the red_team_scenarios.json with suggested prompts and target refusal (how can we make this customisable for users easily)
+- change target refusal to a suggestion rather than exact match 
+- migrate the evaulator from check_for_success in generative_red_team to evaluator.py and evaluate_model_safety to evaluator.py (simple parser for single prompts)
+- red_teaming.py (NEW) should orchestrate and direct all the processes depending on user selection (asynchronous request handling and back off for ratelimits)
+- clone .env in attacks so I can package it as another App
+- start script with find_env and load_env
 
 # App 
 
