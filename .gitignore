@@ -40,7 +40,6 @@ data/
 *.db
 *.sqlite
 vectordb/
-
 # Logs
 *.log
 
@@ -53,11 +52,6 @@ Dockerfile
 # OS
 .DS_Store
 Thumbs.db
-
-# Airflow local runtime
-/airflow.cfg
-/airflow.db*
-/logs/
 
 # Local generated creds/secrets
 *.generated
