@@ -17,7 +17,7 @@ from uuid import uuid4, uuid5, NAMESPACE_DNS
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 
 from langgraph.graph import END, StateGraph
 from langchain.agents import create_agent # updated import path for langgraph.agents import create_react_agent
@@ -170,7 +170,7 @@ class WithdrawalChatbot:
         
         # Supabase database
         self.db = db or SupabaseDB()
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        self._openai_client = OpenAI(api_key=self.api_key)
         
         # Use provided user_id when authenticated; else fall back to a stable local test user.
         self.user_id = user_id or str(uuid5(NAMESPACE_DNS, "local-test-user"))
@@ -246,7 +246,7 @@ class WithdrawalChatbot:
     def _build_tools(self):
         user_id = self.user_id
         db = self.db
-        embedder = self.embedder
+        openai_client = self._openai_client
         policy_llm = self.policy_llm
 
         @tool("get_account_overview")
@@ -267,7 +267,8 @@ class WithdrawalChatbot:
                 return "Please provide a question so I can check the approved documents."
 
             try:
-                query_embedding = embedder.encode(question).tolist()
+                resp = openai_client.embeddings.create(input=question, model="text-embedding-3-small")
+                query_embedding = resp.data[0].embedding
                 results = db.search_documents(embedding=query_embedding, limit=12, threshold=0.5)
             except Exception:
                 results = []
