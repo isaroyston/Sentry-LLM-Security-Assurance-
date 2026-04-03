@@ -2,7 +2,7 @@ import os
 import sys
 from typing import List, Dict, Tuple
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # Add project root to path
@@ -99,10 +99,10 @@ def main():
         print(f"❌ Connection error: {e}")
         return False
 
-    print("📦 Loading embedding model (all-MiniLM-L6-v2)...")
-    embedder = SentenceTransformer('all-MiniLM-L6-v2')
+    print("📦 Initializing OpenAI embeddings (text-embedding-3-small)...")
+    openai_client = OpenAI()
     vs = SupabaseVectorStore(db)
-    print("✓ Embedding model ready\n")
+    print("✓ Embedding client ready\n")
 
     # 3. Process each PDF
     total_chunks_ingested = 0
@@ -128,7 +128,8 @@ def main():
             for i, chunk in enumerate(chunks):
                 try:
                     # Generate embedding
-                    embedding = embedder.encode(chunk).tolist()
+                    resp = openai_client.embeddings.create(input=chunk, model="text-embedding-3-small")
+                    embedding = resp.data[0].embedding
                     
                     # Insert into Supabase
                     result = db.add_document(
@@ -179,7 +180,8 @@ def main():
         ]
         
         for query in test_queries:
-            query_embedding = embedder.encode(query).tolist()
+            resp = openai_client.embeddings.create(input=query, model="text-embedding-3-small")
+            query_embedding = resp.data[0].embedding
             results = vs.search(query_embedding, limit=2)
             
             if results:
