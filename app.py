@@ -51,9 +51,35 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
+            if request.path.startswith('/api/'):
+                return jsonify({"error": "Unauthorized"}), 401
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def _derive_conversation_title(user_message: str) -> str:
+    text = (user_message or "").strip()
+    if not text:
+        return "New Conversation"
+
+    words = text.split()
+    title = " ".join(words[:8]).strip()
+    if len(words) > 8:
+        title += "..."
+    return title[:80] if title else "New Conversation"
+
+
+def _set_active_conversation(user_id: str, conversation_id: str) -> bool:
+    conversation = db.get_conversation(conversation_id)
+    if not conversation or conversation.get("user_id") != user_id:
+        return False
+
+    session["conversation_id"] = conversation_id
+    session_id = session.get("session_id")
+    if session_id:
+        db.client.table("sessions").update({"conversation_id": conversation_id}).eq("id", session_id).execute()
+    return True
 
 # ===================================
 # Auth Routes
@@ -190,35 +216,57 @@ def chat():
 @app.route('/api/chat', methods=['POST'])
 @login_required
 def send_chat():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     user_message = data.get('message', '')
+    requested_title = (data.get('conversation_title') or '').strip()
+    force_new = bool(data.get('new_session'))
     user_id = session.get('user_id')
-    conversation_id = session.get("conversation_id")
+    conversation_id = (data.get("conversation_id") or "").strip()
+    if not conversation_id and not force_new:
+        conversation_id = session.get("conversation_id")
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
     try:
+        if conversation_id and conversation_id != session.get("conversation_id"):
+            if not _set_active_conversation(user_id, conversation_id):
+                return jsonify({"error": "Conversation not found"}), 404
+
         # Ensure conversation exists
         if user_id and not conversation_id:
-            conv = db.create_conversation(user_id=user_id, title="Withdrawal Bot Session")
+            conv_title = requested_title or _derive_conversation_title(user_message)
+            conv = db.create_conversation(user_id=user_id, title=conv_title)
             conversation_id = conv.get("id")
             session["conversation_id"] = conversation_id
-            try:
-                s = db.create_session(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    ip_address=request.remote_addr,
-                    user_agent=request.headers.get("User-Agent"),
-                )
-                session["session_id"] = s.get("id")
-            except Exception:
-                pass
+            session_id = session.get("session_id")
+            if session_id:
+                try:
+                    db.client.table("sessions").update({"conversation_id": conversation_id}).eq("id", session_id).execute()
+                except Exception:
+                    pass
+            else:
+                try:
+                    s = db.create_session(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get("User-Agent"),
+                    )
+                    session["session_id"] = s.get("id")
+                except Exception:
+                    pass
 
         # Initialize chatbot with authenticated user
         bot = WithdrawalChatbot(db=db, user_id=user_id, conversation_id=conversation_id)
         response = bot.chat(user_message)
-        return jsonify({"response": response})
+
+        conversation = db.get_conversation(conversation_id)
+        return jsonify({
+            "response": response,
+            "conversation_id": conversation_id,
+            "conversation_title": (conversation or {}).get("title"),
+        })
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -233,6 +281,44 @@ def get_history():
     try:
         history = db.get_user_conversations(user_id)
         return jsonify({"conversations": history})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/conversations', methods=['GET'])
+@login_required
+def list_conversations():
+    user_id = session.get('user_id')
+    try:
+        conversations = db.get_user_conversations(user_id)
+        return jsonify({
+            "conversations": conversations,
+            "active_conversation_id": session.get("conversation_id"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/conversations/<conversation_id>/select', methods=['POST'])
+@login_required
+def select_conversation(conversation_id):
+    user_id = session.get('user_id')
+    if not _set_active_conversation(user_id, conversation_id):
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"status": "ok", "active_conversation_id": conversation_id})
+
+
+@app.route('/api/conversations/<conversation_id>/messages', methods=['GET'])
+@login_required
+def get_conversation_messages(conversation_id):
+    user_id = session.get('user_id')
+    conversation = db.get_conversation(conversation_id)
+    if not conversation or conversation.get("user_id") != user_id:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    try:
+        messages = db.get_conversation_history(conversation_id, limit=200)
+        return jsonify({"conversation_id": conversation_id, "messages": messages})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
