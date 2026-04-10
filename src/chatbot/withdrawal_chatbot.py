@@ -114,6 +114,7 @@ Output:
 class _ChatState(TypedDict, total=False):
     user_message: str
     history: List[BaseMessage]
+    trace_id: str
     blocked: bool
     block_reason: str
     answer: str
@@ -350,6 +351,30 @@ class WithdrawalChatbot:
             out["safe_answer"] = (data.get("safe_answer") or "").strip()
         return out
 
+    def _preview_text(self, text: str, limit: int = 160) -> str:
+        preview = (text or "").replace("\n", " ").strip()
+        return preview[:limit] + ("..." if len(preview) > limit else "")
+
+    def _log_output_guard_event(
+        self,
+        event: str,
+        trace_id: str,
+        action: str = "",
+        reason: str = "",
+        retry_count: int = 0,
+        user_message: str = "",
+    ) -> None:
+        message_preview = self._preview_text(user_message)
+        print(
+            "[OUTPUT_GUARD]"
+            f"[trace={trace_id or 'n/a'}]"
+            f"[{event}]"
+            f" action='{action or 'n/a'}'"
+            f" retry_count={retry_count}"
+            f" reason='{reason or 'n/a'}'"
+            f" user_message='{message_preview}'"
+        )
+
 
     # ---------------------------
     # LangGraph
@@ -430,40 +455,70 @@ class WithdrawalChatbot:
             if state.get("blocked"):
                 return {}
 
+            trace_id = (state.get("trace_id") or "").strip()
             user_message = state.get("user_message", "")
             draft = state.get("answer") or ""
             draft = self._sanitize_output(draft)
 
             verdict = self._llm_output_check(user_message=user_message, draft_answer=draft)
             action = verdict.get("action")
+            guard_reason = (verdict.get("reason") or "").strip()
+            retry_count = int(state.get("retry_count") or 0)
+
+            self._log_output_guard_event(
+                event="DECISION",
+                trace_id=trace_id,
+                action=str(action or ""),
+                reason=guard_reason,
+                retry_count=retry_count,
+                user_message=user_message,
+            )
+
             if action == "block":
-                if getattr(self, "_debug", False):
-                    print(f"[OUTPUT_CHECK] Blocked output | reason='{verdict.get('reason') or ''}'")
+                self._log_output_guard_event(
+                    event="BLOCK",
+                    trace_id=trace_id,
+                    action="block",
+                    reason=guard_reason,
+                    retry_count=retry_count,
+                    user_message=user_message,
+                )
                 return {"blocked": True, "needs_retry": False, "block_reason": "llm_output_blocked", "answer": _BLOCKED_RESPONSE}
             if action == "retry":
-                retry_count = int(state.get("retry_count") or 0)
                 if retry_count >= 1:
-                    if getattr(self, "_debug", False):
-                        print(
-                            f"[OUTPUT_CHECK] Retry requested again but exhausted | last_reason='{verdict.get('reason') or ''}'"
-                        )
+                    self._log_output_guard_event(
+                        event="BLOCK",
+                        trace_id=trace_id,
+                        action="retry_exhausted",
+                        reason=guard_reason,
+                        retry_count=retry_count,
+                        user_message=user_message,
+                    )
                     return {"blocked": True, "needs_retry": False, "block_reason": "llm_output_retry_exhausted", "answer": _BLOCKED_RESPONSE}
 
-                if getattr(self, "_debug", False):
-                    preview = (user_message or "").replace("\n", " ")
-                    preview = preview[:160] + ("…" if len(preview) > 160 else "")
-                    print(
-                        f"[OUTPUT_CHECK] Retry triggered (next_attempt={retry_count + 1}) | reason='{verdict.get('reason') or ''}' | user_message='{preview}'"
-                    )
+                self._log_output_guard_event(
+                    event="RETRY",
+                    trace_id=trace_id,
+                    action="retry",
+                    reason=guard_reason,
+                    retry_count=retry_count + 1,
+                    user_message=user_message,
+                )
                 return {
                     "retry_count": retry_count + 1,
-                    "guard_reason": (verdict.get("reason") or "").strip(),
+                    "guard_reason": guard_reason,
                     "needs_retry": True,
                 }
             if action == "rewrite":
                 safe_answer = (verdict.get("safe_answer") or "").strip()
-                if getattr(self, "_debug", False):
-                    print(f"[OUTPUT_CHECK] Rewrote output | reason='{verdict.get('reason') or ''}'")
+                self._log_output_guard_event(
+                    event="REWRITE",
+                    trace_id=trace_id,
+                    action="rewrite",
+                    reason=guard_reason,
+                    retry_count=retry_count,
+                    user_message=user_message,
+                )
                 return {"needs_retry": False, "answer": safe_answer or draft}
             return {"needs_retry": False, "answer": draft}
 
@@ -537,7 +592,8 @@ class WithdrawalChatbot:
         try:
             # Expose debug flag to LangGraph nodes for logging
             self._debug = bool(debug)
-            result = self._graph.invoke({"user_message": user_message})
+            trace_id = uuid4().hex[:10]
+            result = self._graph.invoke({"user_message": user_message, "trace_id": trace_id})
             answer = (result or {}).get("answer") or "System error: No answer generated."
 
             # Store user message (after sentinel input check layer)
@@ -563,6 +619,9 @@ class WithdrawalChatbot:
 
             # If Sentinel blocked, flag and return
             if (result or {}).get("blocked"):
+                print(
+                    f"[CHAT][trace={trace_id}] blocked=True block_reason='{(result or {}).get('block_reason') or 'unknown'}'"
+                )
                 self.db.flag_message_as_suspicious(
                     message_id=message_id,
                     reason=(result or {}).get("block_reason") or "blocked",
@@ -594,7 +653,7 @@ class WithdrawalChatbot:
             self._update_session_summary_best_effort()
 
             if debug:
-                return f"[DEBUG] conversation_id={self.conversation_id}\n\n{answer}"
+                return f"[DEBUG] trace_id={trace_id} conversation_id={self.conversation_id}\n\n{answer}"
             return answer
 
         except Exception as e:
