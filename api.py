@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from typing import Optional
 
 from src.db.supabase_client import SupabaseDB
 from src.chatbot.withdrawal_chatbot import WithdrawalChatbot
@@ -10,6 +11,30 @@ from src.chatbot.withdrawal_chatbot import WithdrawalChatbot
 load_dotenv()
 
 app = FastAPI(title="SGBank Withdrawal Assistant API")
+
+# Simple, fixed identity for API-only usage (e.g., red teaming).
+# Must be a valid UUID because the DB column is uuid type.
+DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000"
+
+
+def _ensure_conversation_id() -> str:
+    """Return an active conversation_id, creating one if needed."""
+
+    bot = getattr(app.state, "bot", None)
+    if bot is None:
+        raise HTTPException(status_code=503, detail="Bot not initialized")
+
+    conversation_id: Optional[str] = getattr(app.state, "conversation_id", None)
+    if conversation_id:
+        return conversation_id
+
+    try:
+        conversation_id = bot.clear_history(user_id=DEFAULT_USER_ID)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    app.state.conversation_id = conversation_id
+    return conversation_id
 
 class ChatRequest(BaseModel):
     message: str
@@ -21,6 +46,7 @@ class ChatResponse(BaseModel):
 
 class ResetResponse(BaseModel):
     status: str
+    conversation_id: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -36,6 +62,7 @@ def startup() -> None:
     db = SupabaseDB()
     app.state.bot = WithdrawalChatbot(db=db)
     app.state.db = db
+    app.state.conversation_id = None
 
 @app.get("/health")
 def health():
@@ -48,7 +75,15 @@ def chat(req: ChatRequest):
 
     bot = app.state.bot
     try:
-        return ChatResponse(response=bot.chat(req.message, debug=req.debug))
+        conversation_id = _ensure_conversation_id()
+        return ChatResponse(
+            response=bot.chat(
+                req.message,
+                user_id=DEFAULT_USER_ID,
+                conversation_id=conversation_id,
+                debug=req.debug,
+            )
+        )
     except Exception as e:
         # Keep error surface simple for now (you can refine later)
         raise HTTPException(status_code=500, detail=str(e))
@@ -65,11 +100,12 @@ def reset():
         raise HTTPException(status_code=503, detail="Bot not initialized")
 
     try:
-        bot.clear_history()
+        conversation_id = bot.clear_history(user_id=DEFAULT_USER_ID)
+        app.state.conversation_id = conversation_id
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return ResetResponse(status="ok")
+    return ResetResponse(status="ok", conversation_id=getattr(app.state, "conversation_id", None))
 
 
 @app.post("/search", response_model=SearchResponse)
