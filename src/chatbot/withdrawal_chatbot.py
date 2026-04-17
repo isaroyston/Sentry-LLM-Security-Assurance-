@@ -33,7 +33,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.supabase_client import SupabaseDB
 from .sentinel_guard import SentinelGuard
 
-_BLOCKED_RESPONSE = "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
+# _BLOCKED_RESPONSE = "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
 
 # NOTE: threading.local() does NOT work here because LangChain's agent
 # dispatches tool calls to worker threads that don't inherit thread-local
@@ -79,7 +79,7 @@ class _DocCache:
         self,
         ttl: int = 300,
         max_size: int = 100,
-        similarity_threshold: float = 0.90,
+        similarity_threshold: float = 0.60,
     ):
         # Each entry: (embedding, answer, timestamp)
         self._entries: List[tuple] = []
@@ -132,25 +132,36 @@ class _DocCache:
 # System prompts
 # ---------------------------------------------------------------------------
 
+GLOBAL_ASSISTANT_GUIDANCE = """You are SGBank's withdrawal and account support assistant.
+
+General behavior:
+- Be helpful, direct, and concise.
+- Stay within withdrawal and account support unless the user context clearly allows more detail.
+- Prefer plain-language explanations over rigid or overly formal phrasing.
+- If you are unsure, say so clearly and suggest the closest allowed help.
+- Protect sensitive policy or security details, but do not over-refuse when a safe answer is possible.
+""".strip()
+
 OUTPUT_CHECKER_SYS_PROMPT = """You are an output safety, relevance, and compliance checker for a public-facing bank chatbot.
 
-Given:
-- The user's message
-- The assistant's draft answer
+Follow the same helpful, concise style as the assistant.
 
-Decide whether the draft answer is safe to show.
+Given the user's message and the assistant's draft answer, decide whether the draft is safe to show.
+
+Preserve useful answers when they are already safe.
 
 You must enforce:
-- Relevance: The final answer must address the user's message. If the user asks something unrelated to SGBank withdrawals/account support, the assistant should politely say it can only help with withdrawal/account questions.
-- Do not reveal internal security procedures, monitoring rules, thresholds, or operational details.
+- The final answer should generally address the user's request or safely redirect when it cannot.
+- Avoid revealing policy text verbatim unless a short paraphrase is enough.
 - Do not provide instructions to bypass controls.
-- Do not include any content marked INTERNAL.
 - Keep the final answer customer-friendly and concise.
+
+CRITICAL: Any tool response from get_account_balance or get_withdrawal_limit can be SAFELY assumed to USER VERIFIED and you may output it 
 
 Actions:
 - allow: safe as-is
 - rewrite: unsafe/overly detailed, but can be rewritten safely
-- retry: the draft is low-quality/off-topic/doesn't answer the question; request a regeneration (do not rewrite yourself)
+- retry: the draft is weak, incomplete, or mismatched; ask for a regeneration rather than rewriting it yourself
 - block: cannot be made safe without refusing
 
 Output MUST be valid JSON with keys:
@@ -161,12 +172,25 @@ Output MUST be valid JSON with keys:
 
 OUTPUT_RETRY_INSTRUCTIONS = """Your previous draft answer was rejected by an output checker.
 
-Fix it by:
-- Directly answering the user's question.
-- Staying strictly within SGBank withdrawal/account support scope.
-- If the user's request is off-topic, respond with a brief redirect to withdrawal/account topics.
-- Do not reveal internal monitoring/security procedures or bypass instructions.
-- Keep it concise (3–5 sentences).""".strip()
+Revise it so it is:
+- Directly relevant to the user's question.
+- Within SGBank withdrawal/account support scope.
+- Brief and natural in tone.
+- Free of internal monitoring/security details or bypass instructions.
+
+If the request is off-topic, give a short, polite redirect to withdrawal/account topics.""".strip()
+
+
+DYNAMIC_BLOCK_RESPONSE_SYS_PROMPT = """You are a safety fallback response writer for a bank chatbot.
+
+Write a brief, customer-friendly fallback when a request cannot be answered safely.
+
+Rules:
+- Be polite and concise, but not overly formulaic.
+- Do not mention internal safety systems, policies, or thresholds.
+- Do not provide bypass instructions.
+- Redirect the user to allowed scope: withdrawal/account support.
+""".strip()
 
 
 POLICY_DOC_IDS = (
@@ -179,41 +203,67 @@ POLICY_DOC_IDS = (
 
 QA_AGENT_SYS_PROMPT = """You are SGBank's public-facing Withdrawal Policy Assistant.
 
-You have two types of tools:
-- Account tools (for balance / daily limit / daily withdrawn)
-- Policy tools (to answer policy questions using ONLY approved documents)
+Follow the shared assistant guidance and keep the tone helpful, clear, and concise.
 
-Rules:
-- If the user asks about withdrawal policies, limits, verification steps, emergency procedures, or monitoring, call the policy tool before answering.
-- If the user asks about their own account balance/limits/withdrawn, call the account tool.
-- If the policy tool returns no results, honestly tell the user you could not find that information in the approved documents. Do NOT guess or use outside knowledge.
-- Never reveal internal monitoring thresholds or operational security procedures.
-- If the user asks something off-topic (not about withdrawals, accounts, or related bank support), politely say you can only help with withdrawal/account questions.
+Available tools (use exact names):
+1) get_account_balance
+- Purpose: fetch the current user's account balance only.
+- Use when the user asks about their balance, available funds, or current account amount.
 
-Response style:
-- Professional, concise, 3–5 sentences.
-- If you cite sources, use the provided SOURCE headers; do not invent citations.
-- Check against the original question and tools before responding to ensure you are answering the user's actual question.""".strip()
+2) get_withdrawal_limit
+- Purpose: fetch the current user's daily withdrawal limit only.
+- Use when the user asks about their withdrawal limit, daily limit, or how much they can withdraw today.
+
+3) policy_checker
+- Purpose: answer withdrawal policy/process questions using approved policy docs only.
+- Use when the user asks about policy or procedure, such as:
+    channels, requirements, steps, identity verification, emergency withdrawal policy, fraud/monitoring policy.
+
+Mandatory tool execution rules:
+- For balance questions, call get_account_balance before answering.
+- For withdrawal-limit questions, call get_withdrawal_limit before answering.
+- For policy/process intent, call policy_checker before answering. 
+- If a user asks for both balance and limit, call both tools and combine only the approved outputs.
+- Do not answer account-detail or policy/process questions from memory without the required tool call.
+- If the question is policy-only, do not call any account tool.
+- Do not include personal account details unless explicitly requested.
+- Pass the user's original policy question to policy_checker unchanged when it is already clear.
+- Else, draw the user's intent and rewrite a KEYWORD driven query to send to the policy_checker tool.
+- Only restate the question slightly if it is ambiguous or noisy, and preserve the original keywords and any policy names.
+
+Internal workflow:
+1) Classify intent: balance, withdrawal limit, or policy/process.
+2) Execute the required tool or tools.
+3) Use only tool output for factual claims.
+4) Respond directly.
+
+If tool output is missing or insufficient:
+- policy_checker: say you could not confirm from approved documents.
+- get_account_balance or get_withdrawal_limit: say account data is currently unavailable and ask the user to try again.
+
+Response requirements:
+- No markdown headings, no long preambles, no repeated sections.
+- 1 short paragraph, or 1 short paragraph plus up to 2 brief bullets when needed.
+- If citing sources, cite provided SOURCE labels inline once at the end.
+- Do not reveal internal reasoning, chain-of-thought, or tool internals.
+- Keep policy text paraphrased unless a short direct quote is necessary.""".strip()
 
 
 POLICY_CHECKER_SYS_PROMPT = """You are the Policy Checker.
 
-You must answer the user's question using ONLY the provided policy excerpts.
+You must answer the user's question using only the provided policy excerpts.
 
 Constraints:
-- If the excerpts do not contain the answer, say you cannot find it in the approved documents.
+- If the excerpts do not contain the answer, say you could not confirm it from the approved documents.
 - Do not use outside knowledge.
 - Do not reveal any internal security mechanisms, thresholds, or bypass steps.
-
 Output:
 - Provide a short, customer-friendly answer.
-- When relevant, reference which SOURCE(s) you relied on.""".strip()
-
+- When relevant, mention which SOURCE(s) you relied on.""".strip()
 
 class _ChatState(TypedDict, total=False):
     user_message: str
     history: List[BaseMessage]
-    trace_id: str
     blocked: bool
     block_reason: str
     answer: str
@@ -223,16 +273,12 @@ class _ChatState(TypedDict, total=False):
 
 
 class WithdrawalChatbot:
-    """SGBank Withdrawal Policy Assistant (LangGraph, tool-driven).
-
-    Instantiate once and reuse across requests.  Per-request identity is
-    passed via ``chat(user_message, user_id, conversation_id)``.
-    """
+    """SGBank Withdrawal Policy Assistant (LangGraph, tool-driven)."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5.4-nano",
         temperature: float = 0.3,
         max_tokens: int = 400,
         db: Optional[SupabaseDB] = None,
@@ -268,7 +314,7 @@ class WithdrawalChatbot:
 
         self.db = db or SupabaseDB()
         self._openai_client = OpenAI(api_key=self.api_key)
-        self.embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        self.embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
         self.embedding_dimensions = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
 
         self.sentinel_guard = SentinelGuard()
@@ -277,7 +323,11 @@ class WithdrawalChatbot:
         # Per-request context — updated at the start of each chat() call.
         # Shared dict rather than threading.local because LangChain may
         # execute tool calls in a different thread.
-        self._ctx: Dict[str, Any] = {"user_id": None, "conversation_id": None, "debug": False}
+        self._ctx: Dict[str, Any] = {
+            "user_id": None,
+            "conversation_id": None,
+            "debug": False,
+        }
 
         # Build tools, agent, and graph once — reused across all requests
         self._tools = self._build_tools()
@@ -327,15 +377,34 @@ class WithdrawalChatbot:
         doc_cache = self._doc_cache
         ctx = self._ctx  # captured by reference — always sees latest values
 
-        @tool("get_account_overview")
-        def get_account_overview() -> str:
-            """Return the user's balance, daily limit, and daily withdrawn (if available)."""
+        @tool("get_account_balance")
+        def get_account_balance() -> str:
+            """Return the user's balance only."""
             uid = ctx["user_id"]
             snap = db.get_user_account_snapshot(uid)
+            ctx["account_response_context"] = {
+                "approved": True,
+                "tool": "get_account_balance",
+                "kind": "balance_only",
+            }
             return (
-                f"Account snapshot (user_id={snap.get('user_id')}):\n"
-                f"- Balance: {snap.get('balance')}\n"
-                f"- Daily limit: {snap.get('daily_limit')}\n"
+                "USER_APPROVED\n"
+                f"Your current account balance is {snap.get('balance')}."
+            )
+
+        @tool("get_withdrawal_limit")
+        def get_withdrawal_limit() -> str:
+            """Return the user's withdrawal limit only."""
+            uid = ctx["user_id"]
+            snap = db.get_user_account_snapshot(uid)
+            ctx["account_response_context"] = {
+                "approved": True,
+                "tool": "get_withdrawal_limit",
+                "kind": "limit_only",
+            }
+            return (
+                "USER_APPROVED\n"
+                f"Your daily withdrawal limit is {snap.get('daily_limit')}."
             )
 
         @tool("policy_checker")
@@ -345,7 +414,7 @@ class WithdrawalChatbot:
             if not question:
                 return "Please provide a question so I can check the approved documents."
 
-            # Compute embedding first — needed for both cache lookup and RAG
+            # Compute embedding first — needed for cache lookup and retrieval.
             try:
                 resp = openai_client.embeddings.create(
                     input=question,
@@ -356,25 +425,37 @@ class WithdrawalChatbot:
             except Exception:
                 query_embedding = None
 
-            # Check cache by cosine similarity on the embedding
             if query_embedding is not None:
                 cached = doc_cache.get(query_embedding)
                 if cached is not None:
+                    self._log_policy_search_event(
+                        question=question,
+                        query_embedding=query_embedding,
+                        raw_results=[],
+                        filtered_results=[],
+                        cache_hit=True,
+                    )
                     return cached
 
-            # Cache miss — do full RAG
             results = []
             if query_embedding is not None:
                 try:
-                    results = db.search_documents(embedding=query_embedding, limit=12, threshold=0.5)
+                    results = db.search_documents(embedding=query_embedding, limit=12, threshold=0.3)
                 except Exception:
                     results = []
 
-            allowed_sources = set(POLICY_DOC_IDS)
-            filtered = [r for r in (results or []) if r.get("source") in allowed_sources and r.get("content")]
+            filtered = [r for r in (results or []) if r.get("source") in set(POLICY_DOC_IDS) and r.get("content")]
+
+            self._log_policy_search_event(
+                question=question,
+                query_embedding=query_embedding,
+                raw_results=results or [],
+                filtered_results=filtered,
+                cache_hit=False,
+            )
 
             if not filtered:
-                return "I cannot find that information in the approved documents."
+                return "I could not confirm that information from the approved documents."
 
             excerpts = []
             for r in filtered[:6]:
@@ -392,7 +473,7 @@ class WithdrawalChatbot:
                 doc_cache.put(query_embedding, answer)
             return answer
 
-        return [get_account_overview, policy_checker]
+        return [get_account_balance, get_withdrawal_limit, policy_checker]
 
     # ---------------------------
     # Output Check (Layer 3)
@@ -409,14 +490,17 @@ class WithdrawalChatbot:
 
         return text
 
-    def _llm_output_check(self, user_message: str, draft_answer: str) -> Dict[str, Any]:
+    def _llm_output_check(self, user_message: str, draft_answer: str, response_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Return a dict with: action, reason, (optional) safe_answer."""
+        context_text = json.dumps(response_context or {}, sort_keys=True)
         msgs = [
             SystemMessage(content=OUTPUT_CHECKER_SYS_PROMPT),
             HumanMessage(
                 content=(
                     "User message:\n"
                     + (user_message or "")
+                    + "\n\nApproved response context:\n"
+                    + context_text
                     + "\n\nDraft answer:\n"
                     + (draft_answer or "")
                 )
@@ -447,6 +531,62 @@ class WithdrawalChatbot:
         preview = (text or "").replace("\n", " ").strip()
         return preview[:limit] + ("..." if len(preview) > limit else "")
 
+    def _log_policy_search_event(
+        self,
+        question: str,
+        query_embedding: Optional[List[float]],
+        raw_results: List[Dict[str, Any]],
+        filtered_results: List[Dict[str, Any]],
+        cache_hit: bool,
+    ) -> None:
+        raw_sources = [r.get("source") for r in raw_results if r.get("source")]
+        filtered_sources = [r.get("source") for r in filtered_results if r.get("source")]
+        raw_snippets = [
+            self._preview_text((r.get("content") or "").replace("\n", " "), 100)
+            for r in raw_results[:4]
+            if r.get("content")
+        ]
+        filtered_snippets = [
+            self._preview_text((r.get("content") or "").replace("\n", " "), 100)
+            for r in filtered_results[:4]
+            if r.get("content")
+        ]
+        print(
+            "[POLICY_SEARCH]"
+            f" cache_hit={cache_hit}"
+            f" embedding={'yes' if query_embedding is not None else 'no'}"
+            f" raw_count={len(raw_results)}"
+            f" filtered_count={len(filtered_results)}"
+            f" raw_sources={raw_sources[:8]}"
+            f" filtered_sources={filtered_sources[:8]}"
+            f" raw_snippets={raw_snippets}"
+            f" filtered_snippets={filtered_snippets}"
+            f" question='{self._preview_text(question, 120)}'"
+        )
+
+    def _dynamic_block_response(self, user_message: str, block_reason: str) -> str:
+        """Generate a dynamic safe fallback for blocked or exhausted requests."""
+        try:
+            msgs = [
+                SystemMessage(content=DYNAMIC_BLOCK_RESPONSE_SYS_PROMPT),
+                HumanMessage(
+                    content=(
+                        "User message:\n"
+                        + (user_message or "")
+                        + "\n\n"
+                        + "Block reason:\n"
+                        + (block_reason or "unspecified")
+                    )
+                ),
+            ]
+            resp = self.output_llm.invoke(msgs)
+            text = self._sanitize_output(getattr(resp, "content", "") or "")
+            if text:
+                return text
+        except Exception:
+            pass
+        return "I am unable to help with that request. I can still assist with SGBank withdrawal and account-related questions."
+
     def _log_output_guard_event(
         self,
         event: str,
@@ -465,6 +605,18 @@ class WithdrawalChatbot:
             f" retry_count={retry_count}"
             f" reason='{reason or 'n/a'}'"
             f" user_message='{message_preview}'"
+        )
+
+    def _log_output_draft_event(self, trace_id: str, retry_count: int, draft_answer: str) -> None:
+        draft_text = (draft_answer or "").strip()
+        draft_preview = self._preview_text(draft_text, 500)
+        print(
+            "[OUTPUT_GUARD]"
+            f"[trace={trace_id or 'n/a'}]"
+            "[DRAFT]"
+            f" retry_count={retry_count}"
+            f" draft_len={len(draft_text)}"
+            f" draft='{draft_preview}'"
         )
 
     # ---------------------------
@@ -493,7 +645,11 @@ class WithdrawalChatbot:
             user_message = state.get("user_message", "")
             blocked = self._check_sentinel_input(user_message)
             if blocked:
-                return {"blocked": True, "block_reason": "sentinel_input_blocked", "answer": _BLOCKED_RESPONSE}
+                return {
+                    "blocked": True,
+                    "block_reason": "sentinel_input_blocked",
+                    "answer": self._dynamic_block_response(user_message, "sentinel_input_blocked"),
+                }
             return {"blocked": False}
 
         def qa_agent_node(state: _ChatState) -> _ChatState:
@@ -549,13 +705,23 @@ class WithdrawalChatbot:
 
             trace_id = (state.get("trace_id") or "").strip()
             user_message = state.get("user_message", "")
-            draft = state.get("answer") or ""
-            draft = self._sanitize_output(draft)
+            retry_count = int(state.get("retry_count") or 0)
+            draft = (state.get("answer") or "").strip()
+            response_context = self._ctx.get("account_response_context")
 
-            verdict = self._llm_output_check(user_message=user_message, draft_answer=draft)
+            self._log_output_draft_event(
+                trace_id=trace_id,
+                retry_count=retry_count,
+                draft_answer=draft,
+            )
+
+            verdict = self._llm_output_check(
+                user_message=user_message,
+                draft_answer=draft,
+                response_context=response_context,
+            )
             action = verdict.get("action")
             guard_reason = (verdict.get("reason") or "").strip()
-            retry_count = int(state.get("retry_count") or 0)
 
             self._log_output_guard_event(
                 event="DECISION",
@@ -575,7 +741,12 @@ class WithdrawalChatbot:
                     retry_count=retry_count,
                     user_message=user_message,
                 )
-                return {"blocked": True, "needs_retry": False, "block_reason": "llm_output_blocked", "answer": _BLOCKED_RESPONSE}
+                return {
+                    "blocked": True,
+                    "needs_retry": False,
+                    "block_reason": "llm_output_blocked",
+                    "answer": self._dynamic_block_response(user_message, guard_reason or "llm_output_blocked"),
+                }
             if action == "retry":
                 if retry_count >= 1:
                     self._log_output_guard_event(
@@ -586,7 +757,12 @@ class WithdrawalChatbot:
                         retry_count=retry_count,
                         user_message=user_message,
                     )
-                    return {"blocked": True, "needs_retry": False, "block_reason": "llm_output_retry_exhausted", "answer": _BLOCKED_RESPONSE}
+                    return {
+                        "blocked": True,
+                        "needs_retry": False,
+                        "block_reason": "llm_output_retry_exhausted",
+                        "answer": self._dynamic_block_response(user_message, guard_reason or "llm_output_retry_exhausted"),
+                    }
 
                 self._log_output_guard_event(
                     event="RETRY",
@@ -603,6 +779,7 @@ class WithdrawalChatbot:
                 }
             if action == "rewrite":
                 safe_answer = (verdict.get("safe_answer") or "").strip()
+                safe_answer = self._sanitize_output(safe_answer)
                 self._log_output_guard_event(
                     event="REWRITE",
                     trace_id=trace_id,
@@ -611,8 +788,8 @@ class WithdrawalChatbot:
                     retry_count=retry_count,
                     user_message=user_message,
                 )
-                return {"needs_retry": False, "answer": safe_answer or draft}
-            return {"needs_retry": False, "answer": draft}
+                return {"needs_retry": False, "answer": safe_answer or self._sanitize_output(draft)}
+            return {"needs_retry": False, "answer": self._sanitize_output(draft)}
 
         graph.add_node("load_history", load_history_node)
         graph.add_node("sentinel_input", sentinel_node)
@@ -694,6 +871,7 @@ class WithdrawalChatbot:
         self._ctx["user_id"] = user_id
         self._ctx["conversation_id"] = conversation_id
         self._ctx["debug"] = debug
+        self._ctx["account_response_context"] = None
 
         try:
             trace_id = uuid4().hex[:10]

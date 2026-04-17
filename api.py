@@ -123,7 +123,7 @@ def search(req: SearchRequest):
         if bot is None or db is None:
             raise HTTPException(status_code=503, detail="Bot/DB not initialized")
 
-        embedding_model = getattr(bot, "embedding_model", os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"))
+        embedding_model = getattr(bot, "embedding_model", os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"))
         embedding_dimensions = getattr(bot, "embedding_dimensions", int(os.getenv("EMBEDDING_DIMENSIONS", "384")))
         resp = bot._openai_client.embeddings.create(
             input=req.query,

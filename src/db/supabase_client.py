@@ -281,6 +281,7 @@ class SupabaseDB:
         Returns an empty list on failure so the caller can degrade gracefully.
         """
         try:
+            print(f"[DEBUG][search_documents] RPC start limit={limit} threshold={threshold}")
             response = self.client.rpc(
                 "search_documents",
                 {
@@ -289,7 +290,16 @@ class SupabaseDB:
                     "match_threshold": threshold,
                 },
             ).execute()
-            return response.data if response.data else []
+            rows = response.data if response.data else []
+            print(f"[DEBUG][search_documents] RPC returned {len(rows)} row(s)")
+            if rows:
+                sample = rows[0]
+                print(
+                    "[DEBUG][search_documents] RPC sample "
+                    f"source={sample.get('source')} "
+                    f"content_preview={(sample.get('content') or '')[:100]}"
+                )
+            return rows
         except Exception as e:
             print(f"Error searching documents: {e}")
             return []
@@ -305,6 +315,36 @@ class SupabaseDB:
         except postgrest_exceptions.APIError as e:
             print(f"Error fetching documents: {e}")
             return []
+
+    def delete_documents_by_doc_type(self, doc_type: str) -> int:
+        """Delete all documents of a given doc_type (e.g., 'policy').
+        
+        Returns the number of documents deleted.
+        Useful for clearing old chunks before re-ingesting with new strategy.
+        """
+        try:
+            response = self.client.table("documents").delete().eq("doc_type", doc_type).execute()
+            # Supabase DELETE returns affected row count
+            count = len(response.data) if response.data else 0
+            print(f"[DB] Deleted {count} documents with doc_type='{doc_type}'")
+            return count
+        except postgrest_exceptions.APIError as e:
+            print(f"Error deleting documents: {e}")
+            return 0
+
+    def delete_documents_by_source(self, source: str) -> int:
+        """Delete all documents from a specific source (e.g., 'sgbank_withdrawal_policy').
+        
+        Returns the number of documents deleted.
+        """
+        try:
+            response = self.client.table("documents").delete().eq("source", source).execute()
+            count = len(response.data) if response.data else 0
+            print(f"[DB] Deleted {count} documents with source='{source}'")
+            return count
+        except postgrest_exceptions.APIError as e:
+            print(f"Error deleting documents: {e}")
+            return 0
 
     # ==================== UTILITY METHODS ====================
 
