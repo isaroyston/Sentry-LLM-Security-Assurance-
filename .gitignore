@@ -45,6 +45,7 @@ vectordb/
 
 # Logs
 *.log
+loadtest-report.json
 
 # Reports / evaluation outputs
 reports/
