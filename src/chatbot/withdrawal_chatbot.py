@@ -148,19 +148,34 @@ Follow the same helpful, concise style as the assistant.
 
 Given the user's message and the assistant's draft answer, decide whether the draft is safe to show.
 
-Preserve useful answers when they are already safe.
+Do your best to preserve useful answers especially when they are already safe.
+
+Examples of safe answers:
+- User: "What is my withdrawal limit?" Assistant: "Your daily withdrawal limit is $500." (safe, factual, directly relevant)
+- User: "How do I withdraw money in an emergency?" Assistant: "In an emergency... [brief safe summary of emergency withdrawal policy]" (safe, directly relevant, helpful)
+
+Examples of unsafe answers:
+- Off topic: Explanation about how to earn money after user asks about withdrawal limits / account balance.
+    - eg. Anything that strays away from the domain of banking support.
+- Age-biased
+- Gender-biased
+- Nationality-biased
+- Physical-appearance-biased
+- Race-ethnicity-biased
+- Religion-biased
+- Toxic content
 
 You must enforce:
 - The final answer should generally address the user's request or safely redirect when it cannot.
-- Avoid revealing policy text verbatim unless a short paraphrase is enough.
-- Do not provide instructions to bypass controls.
-- Keep the final answer customer-friendly and concise.
+- Avoid using Documentation text word for word.
+- Keep the final answer customer-friendly.
 
 CRITICAL: Any tool response from get_account_balance or get_withdrawal_limit can be SAFELY assumed to USER VERIFIED and you may output it 
+CRITICAL: Any knowledge the QA Agent generates may be assumed to be factually correct, you need only check if it is safe to show, but you do NOT need to check its factual accuracy since the agent is grounded on tools and approved policy docs only. 
 
 Actions:
 - allow: safe as-is
-- rewrite: unsafe/overly detailed, but can be rewritten safely
+- rewrite: unsafe, but can be rewritten safely
 - retry: the draft is weak, incomplete, or mismatched; ask for a regeneration rather than rewriting it yourself
 - block: cannot be made safe without refusing
 
@@ -205,19 +220,20 @@ QA_AGENT_SYS_PROMPT = """You are SGBank's public-facing Withdrawal Policy Assist
 
 Follow the shared assistant guidance and keep the tone helpful, clear, and concise.
 
-Available tools (use exact names):
+## Available tools (use exact names):
 1) get_account_balance
 - Purpose: fetch the current user's account balance only.
 - Use when the user asks about their balance, available funds, or current account amount.
 
 2) get_withdrawal_limit
 - Purpose: fetch the current user's daily withdrawal limit only.
-- Use when the user asks about their withdrawal limit, daily limit, or how much they can withdraw today.
+- Use when the user asks about their withdrawal limit, daily limit, or anything regarding how much they can withdraw.
 
 3) policy_checker
 - Purpose: answer withdrawal policy/process questions using approved policy docs only.
 - Use when the user asks about policy or procedure, such as:
     channels, requirements, steps, identity verification, emergency withdrawal policy, fraud/monitoring policy.
+- Uses also when you feel that the users query may need policy context to answer, even if they don't explicitly ask about policy. 
 
 Mandatory tool execution rules:
 - For balance questions, call get_account_balance before answering.
@@ -235,11 +251,11 @@ Internal workflow:
 1) Classify intent: balance, withdrawal limit, or policy/process.
 2) Execute the required tool or tools.
 3) Use only tool output for factual claims.
-4) Respond directly.
+4) Respond directly to the users CURRENT question.
 
 If tool output is missing or insufficient:
 - policy_checker: say you could not confirm from approved documents.
-- get_account_balance or get_withdrawal_limit: say account data is currently unavailable and ask the user to try again.
+- get_account_balance or get_withdrawal_limit: say account data is currently unavailable and state the reason if possible.
 
 Response requirements:
 - No markdown headings, no long preambles, no repeated sections.
@@ -657,39 +673,27 @@ class WithdrawalChatbot:
                 return {}
             history = state.get("history") or []
             user_message = state.get("user_message", "")
-            result = self._qa_agent.invoke({"messages": [SystemMessage(content=QA_AGENT_SYS_PROMPT), *history, HumanMessage(content=user_message)]})
-            msgs = result.get("messages") if isinstance(result, dict) else None
-            if isinstance(msgs, list) and msgs:
-                last = msgs[-1]
-                answer = getattr(last, "content", str(last))
-            else:
-                answer = str(result)
-            return {"answer": answer}
-
-        def qa_agent_retry_node(state: _ChatState) -> _ChatState:
-            if state.get("blocked"):
-                return {}
-            history = state.get("history") or []
-            user_message = state.get("user_message", "")
             guard_reason = (state.get("guard_reason") or "").strip()
             retry_count = int(state.get("retry_count") or 0)
 
-            if self._ctx.get("debug", False):
+            if self._ctx.get("debug", False) and retry_count > 0:
                 preview = (user_message or "").replace("\n", " ")
                 preview = preview[:160] + ("…" if len(preview) > 160 else "")
                 print(
                     f"[OUTPUT_CHECK][RETRY] Regenerating answer (attempt={retry_count}) | reason='{guard_reason}' | user_message='{preview}'"
                 )
 
-            retry_system = (
-                QA_AGENT_SYS_PROMPT
-                + "\n\n"
-                + OUTPUT_RETRY_INSTRUCTIONS
-                + (f"\n\nChecker reason: {guard_reason}" if guard_reason else "")
-            )
+            qa_system = QA_AGENT_SYS_PROMPT
+            if retry_count > 0:
+                qa_system = (
+                    QA_AGENT_SYS_PROMPT
+                    + "\n\n"
+                    + OUTPUT_RETRY_INSTRUCTIONS
+                    + (f"\n\nChecker reason: {guard_reason}" if guard_reason else "")
+                )
 
             result = self._qa_agent.invoke(
-                {"messages": [SystemMessage(content=retry_system), *history, HumanMessage(content=user_message)]}
+                {"messages": [SystemMessage(content=qa_system), *history, HumanMessage(content=user_message)]}
             )
             msgs = result.get("messages") if isinstance(result, dict) else None
             if isinstance(msgs, list) and msgs:
@@ -794,7 +798,6 @@ class WithdrawalChatbot:
         graph.add_node("load_history", load_history_node)
         graph.add_node("sentinel_input", sentinel_node)
         graph.add_node("qa_agent", qa_agent_node)
-        graph.add_node("qa_agent_retry", qa_agent_retry_node)
         graph.add_node("output_check", output_check_node)
 
         graph.set_entry_point("load_history")
@@ -808,15 +811,14 @@ class WithdrawalChatbot:
 
         def route_after_output_check(state: _ChatState) -> str:
             if not state.get("blocked") and state.get("needs_retry"):
-                return "qa_agent_retry"
+                return "qa_agent"
             return END
 
         graph.add_conditional_edges(
             "output_check",
             route_after_output_check,
-            {"qa_agent_retry": "qa_agent_retry", END: END},
+            {"qa_agent": "qa_agent", END: END},
         )
-        graph.add_edge("qa_agent_retry", "output_check")
         return graph.compile()
 
     # ---------------------------
