@@ -259,6 +259,7 @@ class SupabaseDB:
                 .select("*")
                 .eq("conversation_id", conversation_id)
                 .order("created_at", desc=False)
+                .or_("metadata->>blocked.is.null,metadata->>blocked.eq.false")  # Exclude messages with metadata.blocked = true
                 .limit(limit)
                 .execute()
             )
