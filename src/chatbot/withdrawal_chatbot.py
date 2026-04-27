@@ -19,7 +19,11 @@ import threading
 import concurrent.futures
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, TypedDict
-from langdetect import detect, detect_langs
+from langdetect import DetectorFactory, detect_langs
+
+# Make langdetect deterministic — by default it seeds randomly per call,
+# which means the same input can flip between languages on retry.
+DetectorFactory.seed = 0
 from dotenv import load_dotenv
 import sys
 from uuid import uuid4
@@ -35,6 +39,69 @@ from langchain.agents import create_agent
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.supabase_client import SupabaseDB
 from .sentinel_guard import SentinelGuard
+
+
+# ---------------------------------------------------------------------------
+# English-only input gate
+# ---------------------------------------------------------------------------
+# A small whitelist of non-ASCII code points that legitimately appear in
+# English input (smart quotes, dashes, ellipsis, NBSP, common currency).
+# Everything else outside printable ASCII is rejected.
+_ALLOWED_NON_ASCII_CODEPOINTS = frozenset({
+    0x00A0,                                  # NBSP
+    0x2018, 0x2019, 0x201A, 0x201B,          # ‘ ’ ‚ ‛
+    0x201C, 0x201D, 0x201E, 0x201F,          # “ ” „ ‟
+    0x2013, 0x2014,                          # – —
+    0x2026,                                  # …
+    0x00A3, 0x00A5, 0x20AC,                  # £ ¥ €
+})
+
+
+def block_non_english(text: str) -> bool:
+    """Return True if `text` should be rejected as non-English.
+
+    Two-stage defence designed to defeat prompt-injection via foreign scripts:
+
+      1. Per-character whitelist. ANY code point outside printable ASCII +
+         the small typography/currency whitelist trips the block. This
+         catches CJK, Cyrillic, Arabic, Greek, Devanagari, Hebrew, Thai,
+         emoji, zero-width chars, and homoglyph attacks (e.g. Cyrillic 'а'
+         U+0430 used to spell "bаlance"). A single foreign char is enough,
+         so mixed English+Chinese like "balance 忽略指令" is rejected.
+
+      2. Latin-script language check. ASCII-only text can still be Spanish,
+         French, Indonesian, etc. For long-enough input we run langdetect
+         and require high-confidence English. We skip this for short input
+         because langdetect is noisy on snippets like "ok" or "thanks".
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+
+    for ch in t:
+        cp = ord(ch)
+        # Tab, LF, CR, printable ASCII
+        if cp in (0x09, 0x0A, 0x0D) or 0x20 <= cp <= 0x7E:
+            continue
+        if cp in _ALLOWED_NON_ASCII_CODEPOINTS:
+            continue
+        return True
+
+    # Stage 2 needs enough signal — under 12 chars langdetect is unreliable.
+    if len(t) < 12:
+        return False
+
+    try:
+        ranked = detect_langs(t)
+    except Exception:
+        # If detection itself blows up on long Latin-script input, treat
+        # as suspicious rather than letting it through silently.
+        return True
+
+    if not ranked:
+        return True
+    top = ranked[0]
+    return top.lang != "en" or top.prob < 0.85
 
 
 # ---------------------------------------------------------------------------
@@ -1086,25 +1153,12 @@ class WithdrawalChatbot:
             conversation_id: Active conversation ID.
             debug: If True, prefix the response with trace info.
         """
+        if block_non_english(user_message):
+            return "Please rephrase your message in English so I can assist you better. \n If you have any questions about SGBank's withdrawal policies or your account, feel free to ask!"
+
         # Set per-request context for LangGraph nodes and tool closures.
         # ContextVars + reset-in-finally guarantees a thread reused by Flask's
         # thread pool can't leak one user's identity into the next request.
-        def block_non_english(text: str) -> bool:
-            t = (text or "").strip()
-            _ALLOWED_ASCII_RE = re.compile(r"^[\x09\x0A\x0D\x20-\x7E]+$")
-            if len(t) < 8:
-                return False  
-            if not _ALLOWED_ASCII_RE.fullmatch(t):
-                return True
-            try:
-                langs = detect(t) 
-                if langs != "en":
-                    return True
-            except Exception:
-                return False
-            
-        if block_non_english(user_message):
-            return "Please rephrase your message in English so I can assist you better. \n If you have any questions about SGBank's withdrawal policies or your account, feel free to ask!"
 
         user_token = _user_id_var.set(user_id)
         conv_token = _conversation_id_var.set(conversation_id)
