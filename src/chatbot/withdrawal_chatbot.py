@@ -473,7 +473,7 @@ OUTPUT_CHECKER_SYS_PROMPT = """
 # Static fallback used only when Sentinel (Layer 1) blocks the INPUT,
 # since the qa_agent + output_checker never see those turns.
 SENTINEL_BLOCK_MESSAGE = (
-    "I'm sorry, I cannot assist with that request. "
+    "I'm sorry, I cannot assist with that request."
     "Please let me know if you have any questions about SGBank's withdrawal policies or your account."
 )
 
@@ -928,7 +928,9 @@ class WithdrawalChatbot:
         def output_check_node(state: _ChatState) -> _ChatState:
             # Sentinel already set answer + blocked flag; just pass through.
             if state.get("blocked"):
-                return {"needs_retry": False}
+                return {
+                    "answer": SENTINEL_BLOCK_MESSAGE,
+                    "needs_retry": False}
 
             trace_id = (state.get("trace_id") or "").strip()
             user_message = state.get("user_message", "")
