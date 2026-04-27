@@ -1088,7 +1088,18 @@ class WithdrawalChatbot:
         # Set per-request context for LangGraph nodes and tool closures.
         # ContextVars + reset-in-finally guarantees a thread reused by Flask's
         # thread pool can't leak one user's identity into the next request.
-        if detect(user_message) != "en":
+        def block_non_english(text: str) -> bool:
+            t = (text or "").strip()
+            if len(t) < 8:
+                return False  
+            try:
+                langs = detect(t) 
+                if langs != "en":
+                    return True
+            except Exception:
+                return False
+            
+        if block_non_english(user_message):
             return "Please rephrase your message in English so I can assist you better. \n If you have any questions about SGBank's withdrawal policies or your account, feel free to ask!"
 
         user_token = _user_id_var.set(user_id)
