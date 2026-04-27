@@ -8,6 +8,7 @@ ContextVars set at the start of each chat() call and reset on exit, so
 concurrent requests on different threads cannot see each other's identity.
 """
 
+from ast import If
 import os
 import json
 import math
@@ -17,6 +18,7 @@ import threading
 import concurrent.futures
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, TypedDict
+from langdetect import detect, detect_langs
 from dotenv import load_dotenv
 import sys
 from uuid import uuid4
@@ -1086,11 +1088,14 @@ class WithdrawalChatbot:
         # Set per-request context for LangGraph nodes and tool closures.
         # ContextVars + reset-in-finally guarantees a thread reused by Flask's
         # thread pool can't leak one user's identity into the next request.
+        if detect(user_message) != "en":
+            return "Please rephrase your message in English so I can assist you better. \n If you have any questions about SGBank's withdrawal policies or your account, feel free to ask!"
+
         user_token = _user_id_var.set(user_id)
         conv_token = _conversation_id_var.set(conversation_id)
         debug_token = _debug_var.set(debug)
         account_token = _account_response_context_var.set(None)
-
+        
         try:
             trace_id = uuid4().hex[:10]
             result = self._graph.invoke({"user_message": user_message, "trace_id": trace_id})
