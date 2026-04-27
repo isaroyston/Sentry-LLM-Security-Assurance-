@@ -11,6 +11,7 @@ concurrent requests on different threads cannot see each other's identity.
 from ast import If
 import os
 import json
+import re
 import math
 import time
 import asyncio
@@ -1090,8 +1091,11 @@ class WithdrawalChatbot:
         # thread pool can't leak one user's identity into the next request.
         def block_non_english(text: str) -> bool:
             t = (text or "").strip()
+            _ALLOWED_ASCII_RE = re.compile(r"^[\x09\x0A\x0D\x20-\x7E]+$")
             if len(t) < 8:
                 return False  
+            if not _ALLOWED_ASCII_RE.fullmatch(t):
+                return True
             try:
                 langs = detect(t) 
                 if langs != "en":
