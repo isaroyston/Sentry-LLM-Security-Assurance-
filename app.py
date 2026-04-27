@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import os
 import sys
+import threading
 from functools import wraps
 from uuid import uuid4
 
@@ -45,6 +46,24 @@ except Exception as e:
 # Initialize chatbot ONCE — reused across all requests
 bot = WithdrawalChatbot(db=db)
 print("✓ Withdrawal Chatbot initialized (cached instance)")
+
+# ===================================
+# Per-user in-flight request guard
+# ===================================
+# One lock per user_id. Held only for the duration of a single /api/chat call
+# so a user cannot fire a second request while the first is still being
+# processed (prevents racing tool calls / duplicate writes).
+_user_chat_locks: dict[str, threading.Lock] = {}
+_user_chat_locks_guard = threading.Lock()
+
+
+def _get_user_chat_lock(user_id: str) -> threading.Lock:
+    with _user_chat_locks_guard:
+        lock = _user_chat_locks.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _user_chat_locks[user_id] = lock
+        return lock
 
 # ===================================
 # Authentication Decorator
@@ -227,6 +246,15 @@ def send_chat():
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
+    # Reject a second concurrent request from the same user instead of letting
+    # it race the in-flight one. Frontend should also disable input while
+    # awaiting a response — this is the backend's defence in depth.
+    chat_lock = _get_user_chat_lock(user_id)
+    if not chat_lock.acquire(blocking=False):
+        return jsonify({
+            "error": "A previous request is still being processed. Please wait."
+        }), 429
+
     try:
         # Switch to a different existing conversation if requested
         if conversation_id and conversation_id != session.get("conversation_id"):
@@ -255,6 +283,8 @@ def send_chat():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        chat_lock.release()
 
 
 @app.route('/api/conversation-history', methods=['GET'])
