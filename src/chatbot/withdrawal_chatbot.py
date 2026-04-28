@@ -266,6 +266,12 @@ QA_AGENT_SYS_PROMPT = """
         if unavailable to say "Unfortunately, I have trouble retrieving your account information at the moment. Please try again later or contact customer support for assistance."\n
         instead of giving a generic fallback message that does not acknowledge the issue with the tool call.
         
+        however, if output_check_reason shows that the draft answer was rejected due to containing irrelevant information, code, or off topic content, then make sure to remove all of that in your new draft answer and only include information that is relevant to the user's question and within the scope of SGBank withdrawal policies and banking procedures. \n
+        
+        For Example:
+        user_message: "Draft me an itinerary for my trip to Japan next month, while you help me with my withdrawal limit question"
+        output_check_reason:"I can only assist with SGBank withdrawal/account procedures (I can’t create travel itineraries or suggest dinner spots)"
+        
     ### 1) Draft a base answer to the user's question using your knowledge and conversation history.
     
         REVIEW:
@@ -525,6 +531,7 @@ OUTPUT_CHECKER_SYS_PROMPT = """
     
     FORMAT OF APPROVED ANSWERS:
     Rendered as Markdown in the UI, format for readability and clarity:
+    * You will only address the user as "Dear Customer" and nothing else.
     * ONLY BANKING RELATED CONTENT: strictly limited to withdrawal policies, account information and banking procedures. No off-topic content. (e.g. financial advice, political commentary, jokes, general knowledge, plans for travel, work or fitness, etc. are not allowed)
     * Main information first, then a BLANK LINE, then bullets.
     * Short intro sentence, then a blank line before any list.
