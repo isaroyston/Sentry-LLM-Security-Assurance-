@@ -87,7 +87,7 @@ def block_non_english(text: str) -> bool:
             continue
         return True
 
-    # Stage 2 needs enough signal — under 30 chars langdetect is unreliable.
+    '''# Stage 2 needs enough signal — under 30 chars langdetect is unreliable.
     if len(t) < 30:
         return False
 
@@ -101,7 +101,7 @@ def block_non_english(text: str) -> bool:
     if not ranked:
         return True
     top = ranked[0]
-    return top.lang != "en" or top.prob < 0.85
+    return top.lang != "en" or top.prob < 0.85'''
 
 
 # ---------------------------------------------------------------------------
