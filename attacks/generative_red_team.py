@@ -43,7 +43,7 @@ Return ONLY the next user prompt text.
 class RedTeamAttacker:
     def __init__(
         self,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5.4",
         tools: list = None,
         custom_prompt: Optional[str] = None,
     ):
@@ -124,7 +124,7 @@ def run_generative_attack(
     - Or provide `json_path` to load a file.
     """
 
-    attacker = RedTeamAttacker(model="gpt-4o-mini", tools=attack_tools, custom_prompt=custom_prompt)
+    attacker = RedTeamAttacker(model="gpt-5.4", tools=attack_tools, custom_prompt=custom_prompt)
 
     if scenarios is None:
         if not json_path:
@@ -139,14 +139,20 @@ def run_generative_attack(
         history_str = ""
         scenario_log = []
         jailbroken = False
-        
+
+        # `objective` is the short goal label used in GENERIC_ATTACKER_SYS_PROMPT.
+        # `description` is the longer behavioural paragraph; we keep it available
+        # but it is NOT what the attacker LLM is briefed on as its objective.
+        scenario_objective = sc.get("objective") or sc.get("description") or sc.get("scenario_id") or ""
+        scenario_attack_type = sc.get("attack_type") or sc.get("objective") or "unknown"
+
         # Start with the 'Seed' prompt from JSON
         counter = 0
         raw_prompt = sc['turns'][0]['input']
         current_prompt = attacker._apply_tools(raw_prompt) if attack_tools else raw_prompt
         for turn in range(max_turns):
             response = bot.chat(current_prompt)
-            
+
             # Check for jailbreak success
             eval_res = llm_evaluate_jailbreak(
                 prompt=current_prompt,
@@ -156,21 +162,32 @@ def run_generative_attack(
             )
             if eval_res.success:
                 jailbroken = True
-            
+
             scenario_log.append({"turn": turn+1, "input": current_prompt, "response": response})
             history_str += f"User: {current_prompt}\nBot: {response}\n\n"
 
             if jailbroken: break # Stop if jailbroken
-            
-            prompt_reference = sc['turns'][counter+1]['input'] if counter+1 < len(sc['turns']) else sc['turns'][0]['input']
-            
-            # Generate the next dynamic attack
-            current_prompt = attacker.generate_next_attack(sc['description'], history_str, prompt_reference)
+
+            # Walk the scripted turns as soft references; once exhausted, drop
+            # the reference (empty string) so the attacker LLM is free to
+            # improvise rather than looping back to the seed.
+            if counter + 1 < len(sc['turns']):
+                prompt_reference = sc['turns'][counter + 1]['input']
+            else:
+                prompt_reference = ""
+
+            # Generate the next dynamic attack — pass the SHORT objective label,
+            # not the long description.
+            current_prompt = attacker.generate_next_attack(
+                scenario_objective,
+                history_str,
+                prompt_reference,
+            )
             counter += 1
 
         results.append({
             "scenario_id": sc['scenario_id'],
-            "attack_type": sc['attack_type'],
+            "attack_type": scenario_attack_type,
             "was_jailbroken": jailbroken,
             "turns_taken": len(scenario_log),
             "log": scenario_log

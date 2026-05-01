@@ -50,7 +50,6 @@ loadtest-report.json
 # Reports / evaluation outputs
 reports/
 
-
 # OS
 .DS_Store
 Thumbs.db
@@ -78,3 +77,6 @@ coverage.xml
 
 # SQLite3 variant
 *.sqlite3
+
+# trees
+* .claude

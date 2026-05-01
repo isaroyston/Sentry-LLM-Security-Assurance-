@@ -581,7 +581,7 @@ class WithdrawalChatbot:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-5.4-nano",
+        model: str = "gpt-5.4-mini",
         temperature: float = 0.3,
         max_tokens: int = 400,
         db: Optional[SupabaseDB] = None,
