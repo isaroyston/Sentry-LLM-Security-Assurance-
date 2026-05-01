@@ -1,203 +1,154 @@
-# Joint-Intern-Project
+# Sentry Project
 
-A chatbot framework with vector database storage and prompt attack testing capabilities.
+A Red Team & Blue Team project tested on a mock agentic withdrawal chatbot. The objective is to explore the vulnerabilities of agentic architectures through an automated red-teaming app, and to implement multilayer ML + LLM defences against prompt injection, policy circumvention, and scope drift.
 
-## Features
+The repository ships two cooperating apps: an attacker (the **Red Teaming App**) and a defender (the **Withdrawal Chatbot** wrapped in **Sentry Blue Team** layers). Running them against each other produces a measurable penetration rate that you can iterate on as you tighten guardrails.
 
-- **Chatbot**: Conversational AI with RAG (Retrieval-Augmented Generation) capabilities
-- **Vector Store**: Efficient document storage and similarity search using Supabase pgvector (384-dim embeddings)
-- **Prompt Attack Dataset**: Security testing dataset with 15+ prompt injection patterns
-- **Frontend Skeleton**: A basic UI for interacting with the chatbot (placeholder mode).
+---
 
-## Getting Started
+## Applications
+
+### Red Teaming App
+
+A Streamlit dashboard that runs single-turn and multi-turn adversarial scenarios against any chatbot endpoint, mutates prompts through a library of obfuscation tools (homoglyph, char-swap, payload-mask, etc.), and scores each turn with an LLM judge. Results are written to `attacks/reports/` for diffing across runs.
+
+![Sentry Red Teamer](pictures/sentry_red_teamer.png)
+
+### Withdrawal Chatbot with Sentry Blue Team Layers
+
+A Flask + LangGraph chatbot grounded on official SGBank withdrawal-policy documents. The Blue Team wraps it in three defensive layers: an external **Sentinel** input guardrail, a tool-driven QA agent constrained to approved policy excerpts, and an LLM **output checker** that can rewrite, block, or send the answer back for one retry.
+
+![Withdrawal Chatbot](pictures/withdrawal_chatbot.png)
+
+---
+
+## Project Directory
 
 ```
 .
+├── app.py                          # Flask entry point — withdrawal chatbot UI
+├── main.py                         # CLI entry point for the chatbot
+├── ingest.py                       # Loads SGBank policy PDFs into the vector store
+├── requirements.txt
+│
 ├── src/
-│   ├── chatbot/           # Chatbot implementation with RAG
-│   │   ├── __init__.py
-│   │   └── chatbot.py
-│   ├── vector_store/      # Vector database for embeddings
-│   │   ├── __init__.py
-│   │   └── vector_store.py
-│   └── datasets/          # Prompt attack dataset
-│       ├── __init__.py
-│       └── prompt_attacks.py
-├── tests/                 # Unit tests
-├── examples.py           # Example usage
-├── requirements.txt      # Python dependencies
-├── .env.example         # Environment variables template
-└── README.md            # This file
+│   ├── chatbot/
+│   │   ├── withdrawal_chatbot.py   # LangGraph agent, output checker, retry edge
+│   │   └── sentinel_guard.py       # External Sentinel input-guardrail client
+│   ├── db/
+│   │   └── supabase_client.py      # Supabase + pgvector client
+│   └── documents/                  # SGBank policy PDFs (RAG source of truth)
+│
+├── frontend/
+│   ├── templates/                  # Flask Jinja templates (index, login, register)
+│   └── static/                     # JS + CSS for the chat UI
+│
+├── attacks/
+│   ├── streamlit_app.py            # Red Team dashboard
+│   ├── red_teaming.py              # Single-turn attack runner
+│   ├── generative_red_team.py      # Multi-turn attacker LLM + scenario walker
+│   ├── evaluator.py                # LLM judge for jailbreak success
+│   ├── prompt_attacks.py           # Static attack catalogue
+│   ├── modules/                    # Mutation tools (homoglyph, char_swap, …)
+│   ├── datasets/                   # Bias / toxicity CSVs + multi-turn scenarios
+│   └── reports/                    # Penetration test results
+│
+└── pictures/                       # Architecture diagrams used in this README
 ```
 
-## Installation
+---
 
-1. Clone the repository:
+## Run Project Instructions
+
+### Common setup (do this once)
+
 ```bash
-git clone https://github.com/isaroyston/Joint-Intern-Project.git
+# 1. Clone + virtualenv
+git clone <repo-url> Joint-Intern-Project
 cd Joint-Intern-Project
-```
-
-2. Create a virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+source venv/bin/activate                 # Windows: venv\Scripts\activate
 
-3. Install dependencies:
-```bash
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-4. Set up environment variables:
-```bash
+# 3. Configure environment variables
 cp .env.example .env
-# Edit .env and add your OpenAI API key
+# Edit .env — required keys:
+#   OPENAI_API_KEY=...
+#   SENTINEL_API_KEY=...
+#   SENTINEL_API_URL=https://sentinel.stg.aiguardian.gov.sg/api/v1/validate
+#   SUPABASE_URL=...
+#   SUPABASE_KEY=...
 ```
 
-## Quick Start
-
-### Vector Store Usage
-
-```python
-from src.vector_store import VectorStore
-
-# Initialize vector store
-vector_store = VectorStore(
-    persist_directory="./data/vector_db",
-    collection_name="my_collection"
-)
-
-# Add documents
-documents = [
-    "Python is a programming language.",
-    "Machine learning is a subset of AI."
-]
-vector_store.add_documents(documents)
-
-# Search for similar documents
-results = vector_store.search("What is Python?", n_results=2)
-print(results['documents'])
-```
-
-### Chatbot Usage
-
-```python
-from src.chatbot import Chatbot
-from src.vector_store import VectorStore
-
-# Initialize with vector store for RAG
-vector_store = VectorStore()
-vector_store.add_documents(["Your knowledge base documents here"])
-
-# Create chatbot
-chatbot = Chatbot(
-    api_key="your-openai-api-key",
-    vector_store=vector_store
-)
-
-# Chat with RAG
-response = chatbot.chat("Your question here", use_rag=True)
-print(response)
-```
-
-### Prompt Attack Testing
-
-```python
-from src.datasets import PromptAttackDataset
-
-# Load attack dataset
-dataset = PromptAttackDataset()
-
-# Get all attacks
-attacks = dataset.get_all_attacks()
-print(f"Total attacks: {len(attacks)}")
-
-# Filter by severity
-high_severity = dataset.get_attacks_by_severity("high")
-
-# Filter by category
-injection_attacks = dataset.get_attacks_by_category("instruction_override")
-
-# Test chatbot security
-results = dataset.test_chatbot(chatbot, log_file="results.json")
-```
-
-## Running Examples
+### Withdrawal Bot
 
 ```bash
-python examples.py
+# 1. One-off: ingest the SGBank policy PDFs into Supabase pgvector
+python ingest.py
+
+# 2. Launch the Flask UI
+python app.py
+# → http://localhost:5000
 ```
 
-## Components
+For a headless CLI session: `python main.py`.
 
-### 1. Vector Store (`src/vector_store/`)
-- Uses ChromaDB for efficient vector storage
-- Sentence transformers for embeddings
-- Supports document addition, search, and management
+### Red Team App
 
-### 2. Chatbot (`src/chatbot/`)
-- OpenAI GPT integration
-- RAG capabilities with vector store
-- Conversation history management
-- Customizable system prompts
+The Red Team app talks to the chatbot over HTTP, so you need the bot's API endpoint running before you launch the dashboard.
 
-### 3. Prompt Attack Dataset (`src/datasets/`)
-- 15+ predefined attack patterns
-- Categories: injection, jailbreak, social engineering, etc.
-- Severity levels: high, medium, low
-- Testing capabilities for chatbot security
+```bash
+# 1. Start the FastAPI endpoint that exposes the chatbot to the attacker
+uvicorn api:app --host 0.0.0.0 --port 8000
+# → http://localhost:8000  (POST /chat)
 
-## Attack Categories
+# 2. In a second terminal, launch the Streamlit dashboard
+streamlit run attacks/streamlit_app.py
+```
 
-- **instruction_override**: Direct attempts to override system instructions
-- **role_manipulation**: Trying to change the AI's role or persona
-- **information_extraction**: Attempting to extract system prompts or config
-- **jailbreak**: Bypassing safety measures
-- **social_engineering**: Using manipulation tactics
-- **encoding_attack**: Using encoding to hide malicious intent
-- **context_manipulation**: Injecting fake context
-- **technical_exploit**: Using special tokens or technical tricks
+The dashboard loads `attacks/.env` if present, otherwise it falls back to the repo-root `.env`. Point its `CHATBOT_API_URL` (or equivalent setting in the dashboard) at the `api.py` endpoint above. Reports are written to `attacks/reports/` and can be replayed or diffed between defence iterations.
+
+---
+
+## Red Team
+
+![Red Team Workflow](pictures/red_teamer_workflow.png)
+
+The attacker LLM is briefed with a scenario `objective`, a soft `prompt_reference` for the next scripted turn, and the running conversation history. Each generated prompt may be passed through a chain of mutation tools before it hits the bot, and every bot response is scored by an LLM evaluator that flags jailbreak success when the response leaks internal state, drifts off-topic, or surrenders policy-circumventing detail.
+
+## Blue Team
+
+![Blue Team Workflow](pictures/blue_team_workflow.png)
+
+Four layered defences sit in front of the QA agent:
+
+1. **Language query filter** — a per-character allowlist guard (`block_non_english` in `withdrawal_chatbot.py`) that rejects any input containing CJK characters, Cyrillic, Arabic, or other non-Latin scripts before it reaches the LLM. This blocks homoglyph and foreign-script prompt-injection attacks (e.g. Chinese-character payloads, Cyrillic look-alikes used to spell ASCII tokens).
+2. **Sentinel input guardrail** — external safety classifier that blocks prompt-injection and unsafe input before any tool is reached.
+3. **Tool-driven QA agent** — answers are grounded on `get_account_balance`, `get_withdrawal_limit`, and a RAG `policy_checker` that retrieves only from approved SGBank policy documents.
+4. **LLM output checker** — validates every draft for safety, scope, and compliance. It can return the draft as-is, rewrite it, or route it back to the QA agent for one retry with feedback.
+
+## Withdrawal Chatbot
+
+![Withdrawal Chatbot Workflow](pictures/withdrawal_bot_workflow.png)
+
+The chatbot is implemented as a LangGraph state machine: `load_history → sentinel_input → qa_agent → output_check`, with a single conditional edge from `output_check` back to `qa_agent` when a retry is requested. Conversation history and per-user account snapshots live in Supabase; policy excerpts live in pgvector and are retrieved through a keyword-rewrite + cosine-similarity cache pipeline.
+
+---
 
 ## Environment Variables
 
 ```env
-OPENAI_API_KEY=your_api_key_here
-SENTINEL_API_KEY=your_sentinel_api_key_here
+OPENAI_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-large
+EMBEDDING_DIMENSIONS=384
+
+SENTINEL_API_KEY=
 SENTINEL_API_URL=https://sentinel.stg.aiguardian.gov.sg/api/v1/validate
-VECTOR_DB_PATH=./data/vector_db
-COLLECTION_NAME=chatbot_knowledge
-MODEL_NAME=gpt-3.5-turbo
-TEMPERATURE=0.7
-MAX_TOKENS=500
+
+SUPABASE_URL=
+SUPABASE_KEY=
+
+RED_TEAM_EVAL_MODEL=gpt-4o-mini
 ```
-
-## Development
-
-### Running Tests
-```bash
-# Tests can be added in the tests/ directory
-pytest tests/
-```
-
-## Red Team Dashboard (Streamlit)
-
-Run the local dashboard:
-
-```bash
-pip install -r requirements.txt
-streamlit run attacks/streamlit_app.py
-```
-
-Environment variables:
-
-- The app will load `attacks/.env` if present, otherwise it will fall back to the repo-root `.env`.
-- Use `attacks/.env.example` as a template.
-
-## License
-
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
